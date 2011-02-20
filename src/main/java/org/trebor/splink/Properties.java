@@ -32,10 +32,7 @@ public class Properties extends java.util.Properties {
         try {
             file = new File(filename);
             if (file.exists()) {
-              {
                 load(new FileInputStream(file));
-                System.out.println("load!");
-              }
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -201,7 +198,7 @@ public class Properties extends java.util.Properties {
      * @param name  the name of the property
      * @param value the value that this property will take
      */
-    public void set(String name, int value) {
+    public void set(String name, Integer value) {
         setProperty(name, "" + value);
     }
 
@@ -325,8 +322,8 @@ public class Properties extends java.util.Properties {
      * @return the integer value of property if it exists, otherwise it
      * throws an exception.
      */
-    public int getInteger(String name) {
-        return Integer.valueOf(getProperty(name));
+    public Integer getInteger(String name) {
+        return Integer.parseInt(getProperty(name));
     }
 
     /**

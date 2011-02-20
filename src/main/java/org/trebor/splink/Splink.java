@@ -26,6 +26,7 @@ import javax.swing.JTable;
 import javax.swing.KeyStroke;
 import javax.swing.ToolTipManager;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableModel;
 
 import org.openrdf.model.Namespace;
 import org.openrdf.query.Binding;
@@ -50,72 +51,46 @@ public class Splink extends JFrame
 
   private Properties mProperties;
   private JEditorPane mEditor;
+  private JTable mPrefix;
   private JTable mResult;
   private JLabel mOutput;
+  private TableModel mPrefixTable;
   private Repository mRepository;
   private RepositoryConnection mConnection;
-  private String mSesameServer = "http://localhost:8080/openrdf-sesame";
-  private String mRepositoryID = "test";
   private Map<String, String> mNameSpaceMap;
   
-  public static void main(String[] args)
-  {
-    System.setProperty("apple.laf.useScreenMenuBar", "true");
-    new Splink();
-  }
-  
-  public Splink()
-  {
-    try
-    {
-      initializeProperities();
-      constructFrame(getContentPane());
-      pack();
-      setVisible(true);
-      
-      mRepository = new HTTPRepository(mSesameServer, mRepositoryID);
-      mRepository.initialize();
-      mConnection = mRepository.getConnection();
-      initNameSpace();
-      
-      RepositoryResult<Namespace> nameSpaces = mConnection.getNamespaces();
-      StringBuffer buffer = new StringBuffer();
-      
-      while (nameSpaces.hasNext())
-      {
-        Namespace nameSpace = nameSpaces.next();
-        buffer.append(String.format("PREFIX %s:<%s>\n", nameSpace.getPrefix(), nameSpace.getName()));
-      }
-      buffer.append("\nselect * where {?s ?p ?o}\n");
-      mEditor.setText(buffer.toString());
-    }
-    catch (RepositoryException e)
-    {
-      setError(e.toString());
-    }
-  }
-
   enum Property
   {
-    EDITOR_SIZE("gui.editor.size", Dimension.class, new Dimension(800, 300)), 
+    SESAME_HOST("sesame.host", String.class, "localhost"),
+    SESAME_PORT("sesame.port", Integer.class, 8080),
+    SESAME_REPOSITORY("sesame.repository", String.class, "test"),
+    
+    EDITOR_SIZE("gui.editor.size", Dimension.class, new Dimension(300, 250)), 
     EDITOR_FONT("gui.editor.font", Font.class, new Font("Courier", Font.BOLD, 18)),
     EDITOR_FONT_CLR("gui.editor.color", Color.class, Color.DARK_GRAY),
-    RESULT_SIZE("gui.result.size", Dimension.class, new Dimension(800, 200)),
+  
+    PREFIX_SIZE("gui.prefix.size", Dimension.class, new Dimension(600, 250)), 
+    PREFIX_FONT("gui.prefix.font", Font.class, new Font("Courier", Font.BOLD, 18)),
+    PREFIX_FONT_CLR("gui.prefix.color", Color.class, Color.GRAY),
+    PREFIX_COL1_WIDTH("gui.prefix.col1.width", Integer.class, 100),
+    PREFIX_COL2_WIDTH("gui.prefix.col2.width", Integer.class, 500),
+  
+    RESULT_SIZE("gui.result.size", Dimension.class, new Dimension(900, 400)),
     RESULT_FONT("gui.result.font", Font.class, new Font("Courier", Font.BOLD, 15)),
-    RESUlT_FONT_CLR("gui.result.color", Color.class, Color.GRAY);
+    RESUlT_FONT_CLR("gui.result.color", Color.class, Color.DARK_GRAY);
     
     final private String mName;
     final private Class<?> mType;
     final private Object mDefaultValue;
     private Properties mProperties;
-
+  
     Property(String name, Class<?> type, Object defaultValue)
     {
       mName = name;
       mType = type;
       mDefaultValue = defaultValue;
     }
-
+  
     public static void initialize(Properties properties)
     {
       for (Property property : values())
@@ -158,12 +133,12 @@ public class Splink extends JFrame
     {
       return mProperties.getRectangle(mName);
     }
-
+  
     public Color getColor()
     {
       return mProperties.getColor(mName);
     }
-
+  
     public String getString()
     {
       return mProperties.getString(mName);
@@ -173,7 +148,7 @@ public class Splink extends JFrame
     {
       return mProperties.getDouble(mName);
     }
-
+  
     public int getInteger()
     {
       return mProperties.getInteger(mName);
@@ -184,26 +159,77 @@ public class Splink extends JFrame
       return mProperties.getBoolean(mName);
     }
   }
+
+  public static void main(String[] args)
+  {
+    System.setProperty("apple.laf.useScreenMenuBar", "true");
+    new Splink();
+  }
   
+  public Splink()
+  {
+    try
+    {
+      initializeProperities();
+      constructFrame(getContentPane());
+      pack();
+      setVisible(true);
+
+      mRepository =
+        new HTTPRepository(String.format("http://%s:%d/openrdf-sesame",
+          SESAME_HOST.getString(), SESAME_PORT.getInteger()),
+          SESAME_REPOSITORY.getString());
+      mRepository.initialize();
+      mConnection = mRepository.getConnection();
+      initNameSpace();
+      mEditor.setText("SELECT\n\t*\nWHERE\n{\n\t?s ?p ?o\n}");
+    }
+    catch (RepositoryException e)
+    {
+      setError(e.toString());
+    }
+  }
+
   private void initializeProperities()
   {
     mProperties = new Properties(PROPERTIES_FILE);
     Property.initialize(mProperties);
-    out.println(EDITOR_SIZE.getDimension());
-    out.println(EDITOR_FONT.getFont());
-    
+    for (Object key: mProperties.keySet())
+      out.println(String.format("%s: %s", key, mProperties.get(key)));
   }
 
   private void initNameSpace()
   {
     try
     {
+      // init name-space map
+      
       mNameSpaceMap = new HashMap<String, String>();
+      
+      // init name-space table
+      
+      DefaultTableModel prefixTable = new DefaultTableModel();
+      prefixTable.addColumn("prefix");
+      prefixTable.addColumn("value");
+      
+      // populate table and map
+      
       RepositoryResult<Namespace> nameSpaces = mConnection.getNamespaces();
       while (nameSpaces.hasNext())
       {
         Namespace nameSpace = nameSpaces.next();
         mNameSpaceMap.put(nameSpace.getName(), nameSpace.getPrefix());
+        prefixTable.addRow(new String[]{nameSpace.getPrefix(), nameSpace.getName()});
+      }
+
+      // init master prefix table
+      
+      mPrefixTable = prefixTable;
+      if (null != mPrefix)
+      {
+        mPrefix.setModel(mPrefixTable);
+        mPrefix.getColumnModel().getColumn(0).setPreferredWidth(PREFIX_COL1_WIDTH.getInteger());
+        mPrefix.getColumnModel().getColumn(1).setPreferredWidth(PREFIX_COL2_WIDTH.getInteger());
       }
     }
     catch (Exception e)
@@ -240,7 +266,14 @@ public class Splink extends JFrame
     mEditor = new JEditorPane();
     mEditor.setFont(EDITOR_FONT.getFont());
     mEditor.setForeground(EDITOR_FONT_CLR.getColor());
-    
+
+    // add editor
+
+    mPrefix = new JTable();
+    mPrefix.setFont(PREFIX_FONT.getFont());
+    mPrefix.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
+    mPrefix.setForeground(PREFIX_FONT_CLR.getColor());
+
     // add result area
 
     mResult = new JTable();
@@ -251,14 +284,19 @@ public class Splink extends JFrame
 
     mOutput = new JLabel(" ");
 
-    // create split pane
+    // compose all the elements into the display
 
     final JScrollPane editScroll = new JScrollPane(mEditor);
     editScroll.setPreferredSize(EDITOR_SIZE.getDimension());
+
+    final JScrollPane prefixScroll = new JScrollPane(mPrefix);
+    prefixScroll.setPreferredSize(PREFIX_SIZE.getDimension());
+
     final JScrollPane resultScroll = new JScrollPane(mResult);
     resultScroll.setPreferredSize(RESULT_SIZE.getDimension());
     JSplitPane split =
-      new JSplitPane(JSplitPane.VERTICAL_SPLIT, editScroll, resultScroll);
+      new JSplitPane(JSplitPane.VERTICAL_SPLIT, new JSplitPane(
+        JSplitPane.HORIZONTAL_SPLIT, editScroll, prefixScroll), resultScroll);
     frame.add(split, BorderLayout.CENTER);
     frame.add(mOutput, BorderLayout.SOUTH);
 
@@ -267,15 +305,16 @@ public class Splink extends JFrame
     ToolTipManager.sharedInstance().setDismissDelay(Integer.MAX_VALUE);
 
     // save preferred window sizes when application closes
-    
+
     Runtime.getRuntime().addShutdownHook(new Thread()
     {
       public void run()
       {
-        System.out.println("save!");
-        
         EDITOR_SIZE.set(editScroll.getSize());
-        RESULT_SIZE.set(editScroll.getSize());
+        PREFIX_SIZE.set(prefixScroll.getSize());
+        RESULT_SIZE.set(resultScroll.getSize());
+        PREFIX_COL1_WIDTH.set(mPrefix.getColumnModel().getColumn(0).getWidth());
+        PREFIX_COL2_WIDTH.set(mPrefix.getColumnModel().getColumn(1).getWidth());
       }
     });
   }
