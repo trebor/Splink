@@ -1,11 +1,12 @@
 package org.trebor.splink;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Container;
 import java.awt.event.ActionEvent;
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
-import java.util.List;
+import java.util.Map;
 import java.util.Vector;
 
 import javax.swing.AbstractAction;
@@ -13,28 +14,21 @@ import javax.swing.JEditorPane;
 import javax.swing.JFrame;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
-import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.KeyStroke;
+import javax.swing.ToolTipManager;
 import javax.swing.plaf.DimensionUIResource;
-import javax.swing.table.DefaultTableColumnModel;
 import javax.swing.table.DefaultTableModel;
-import javax.swing.table.TableColumn;
-import javax.swing.table.TableColumnModel;
-import javax.swing.table.TableModel;
 
 import org.openrdf.model.Namespace;
-import org.openrdf.model.Value;
 import org.openrdf.query.Binding;
 import org.openrdf.query.BindingSet;
 import org.openrdf.query.QueryLanguage;
 import org.openrdf.query.TupleQuery;
 import org.openrdf.query.TupleQueryResult;
-import org.openrdf.query.TupleQueryResultHandler;
-import org.openrdf.query.TupleQueryResultHandlerException;
 import org.openrdf.repository.Repository;
 import org.openrdf.repository.RepositoryConnection;
 import org.openrdf.repository.RepositoryException;
@@ -54,6 +48,7 @@ public class Splink extends JFrame
   private RepositoryConnection mConnection;
   private String mSesameServer = "http://localhost:8080/openrdf-sesame";
   private String mRepositoryID = "test";
+  private Map<String, String> mNameSpaceMap;
   
   public static void main(String[] args)
   {
@@ -71,6 +66,7 @@ public class Splink extends JFrame
       mRepository = new HTTPRepository(mSesameServer, mRepositoryID);
       mRepository.initialize();
       mConnection = mRepository.getConnection();
+      initNameSpace();
       
       RepositoryResult<Namespace> nameSpaces = mConnection.getNamespaces();
       StringBuffer buffer = new StringBuffer();
@@ -85,10 +81,37 @@ public class Splink extends JFrame
     }
     catch (RepositoryException e)
     {
-      setMessage(e.toString());
+      setError(e.toString());
     }
   }
 
+  private void initNameSpace()
+  {
+    try
+    {
+      mNameSpaceMap = new HashMap<String, String>();
+      RepositoryResult<Namespace> nameSpaces = mConnection.getNamespaces();
+      while (nameSpaces.hasNext())
+      {
+        Namespace nameSpace = nameSpaces.next();
+        mNameSpaceMap.put(nameSpace.getName(), nameSpace.getPrefix());
+      }
+    }
+    catch (Exception e)
+    {
+      setError(e.toString());
+    }
+  }
+  
+  private String convertUri(String uri)
+  {
+    for (String name: mNameSpaceMap.keySet())
+      if (uri.startsWith(name))
+        return uri.replace(name, mNameSpaceMap.get(name) + ":");
+    
+    return uri;
+  }
+  
   private void constructFrame(Container frame)
   {
     // configure frame
@@ -106,20 +129,19 @@ public class Splink extends JFrame
     // add editor
     
     mEditor = new JEditorPane();
-    //mEditor.setPreferredSize(new DimensionUIResource(500, 200));
 
     // add result area
     
     mResult = new JTable();
-    //mResult.setPreferredSize(new DimensionUIResource(500, 200));
     
     // add output
     
-    mOutput = new JTextArea(3, 1);
+    mOutput = new JTextArea(1, 10);
     mOutput.setEditable(false);
-    mOutput.setWrapStyleWord(true);
-    mOutput.setLineWrap(true);
 
+    //mOutput.setWrapStyleWord(true);
+    //mOutput.setLineWrap(true);
+    
     // create split pane
     
     JScrollPane editScroll = new JScrollPane(mEditor);
@@ -128,7 +150,11 @@ public class Splink extends JFrame
     resultScroll.setPreferredSize(new DimensionUIResource(800, 200));
     JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, editScroll, resultScroll);
     frame.add(split, BorderLayout.CENTER);
-    frame.add(new JScrollPane(mOutput), BorderLayout.SOUTH);
+    frame.add(mOutput, BorderLayout.SOUTH);
+    
+    // adjust tooltip timeout
+    
+    ToolTipManager.sharedInstance().setDismissDelay(Integer.MAX_VALUE);
   }
 
   private void submit()
@@ -149,7 +175,7 @@ public class Splink extends JFrame
     {
       TupleQuery query = mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
       TupleQueryResult result = query.evaluate();
-      
+
       // create the table model
       
       DefaultTableModel tm = new DefaultTableModel();
@@ -163,7 +189,7 @@ public class Splink extends JFrame
         Vector<String> row = new Vector<String>();
         Iterator<Binding> rowData = result.next().iterator();
         while (rowData.hasNext())
-          row.add(rowData.next().getValue().toString());
+          row.add(convertUri(rowData.next().getValue().toString()));
 
         tm.addRow(row);        
       }
@@ -171,21 +197,42 @@ public class Splink extends JFrame
       // update the display
       
       mResult.setModel(tm);
-      setMessage("cols: %d, rows: %d", tm.getRowCount(), tm.getColumnCount());
+      setMessage("cols: %d, rows: %d", tm.getColumnCount(), tm.getRowCount());
     }
     catch (Exception e)
     {
       mResult.setModel(new DefaultTableModel());
-      setMessage(e.toString());
+      setError(e.toString());
     }
+  }
+
+  public void setError(String message, Object... args)
+  {
+    setMessage(Color.RED, message, args);
   }
   
   public void setMessage(String message, Object... args)
   {
-    mOutput.setText(String.format(message, args));
-    mOutput.repaint();
+    setMessage(Color.GREEN.darker().darker().darker(), message, args);
   }
-
+  
+  public void setWarning(String message, Object... args)
+  {
+    setMessage(Color.YELLOW, message, args);
+  }
+  
+  public void setMessage(Color color, String message, Object... args)
+  {
+    String fullMessage = String.format(message, args);
+    String toolTip =
+      fullMessage.replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+        .replaceAll("\n", "<br>");
+    mOutput.setToolTipText("<html>" + toolTip + "</html>");
+    mOutput.setText(fullMessage);
+    mOutput.setForeground(color);
+    mOutput.repaint();
+  }  
+  
   /**
    * Splink is derived from AbstractAction and provides a standard
    * class from which to subclass Game actions.
