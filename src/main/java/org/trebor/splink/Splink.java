@@ -2,6 +2,7 @@ package org.trebor.splink;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Font;
@@ -24,9 +25,13 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
 import javax.swing.KeyStroke;
+import javax.swing.SwingConstants;
 import javax.swing.ToolTipManager;
+import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableModel;
+import javax.swing.text.PlainDocument;
 
 import org.openrdf.model.Namespace;
 import org.openrdf.query.Binding;
@@ -55,6 +60,7 @@ public class Splink extends JFrame
   private JTable mResult;
   private JLabel mOutput;
   private TableModel mPrefixTable;
+  private String mQueryPrefixString;
   private Repository mRepository;
   private RepositoryConnection mConnection;
   private Map<String, String> mNameSpaceMap;
@@ -68,10 +74,12 @@ public class Splink extends JFrame
     EDITOR_SIZE("gui.editor.size", Dimension.class, new Dimension(300, 250)), 
     EDITOR_FONT("gui.editor.font", Font.class, new Font("Courier", Font.BOLD, 18)),
     EDITOR_FONT_CLR("gui.editor.color", Color.class, Color.DARK_GRAY),
+    EDITOR_TAB_SIZE("gui.editor.tabsize", Integer.class, 2),
   
     PREFIX_SIZE("gui.prefix.size", Dimension.class, new Dimension(600, 250)), 
     PREFIX_FONT("gui.prefix.font", Font.class, new Font("Courier", Font.BOLD, 18)),
-    PREFIX_FONT_CLR("gui.prefix.color", Color.class, Color.GRAY),
+    PREFIX_PREFIX_FONT_CLR("gui.prefix.prefix.color", Color.class, Color.DARK_GRAY),
+    PREFIX_VALUE_FONT_CLR("gui.prefix.value.color", Color.class, Color.GRAY),
     PREFIX_COL1_WIDTH("gui.prefix.col1.width", Integer.class, 100),
     PREFIX_COL2_WIDTH("gui.prefix.col2.width", Integer.class, 500),
   
@@ -196,15 +204,16 @@ public class Splink extends JFrame
     Property.initialize(mProperties);
     for (Object key: mProperties.keySet())
       out.println(String.format("%s: %s", key, mProperties.get(key)));
-  }
-
+  }  
+  
   private void initNameSpace()
   {
     try
     {
-      // init name-space map
+      // init name-space map and a buffer to build the query prefix string
       
       mNameSpaceMap = new HashMap<String, String>();
+      StringBuffer queryPrefixBuffer = new StringBuffer();
       
       // init name-space table
       
@@ -220,8 +229,13 @@ public class Splink extends JFrame
         Namespace nameSpace = nameSpaces.next();
         mNameSpaceMap.put(nameSpace.getName(), nameSpace.getPrefix());
         prefixTable.addRow(new String[]{nameSpace.getPrefix(), nameSpace.getName()});
+        queryPrefixBuffer.append(String.format("PREFIX %s:<%s>\n", nameSpace.getPrefix(), nameSpace.getName()));
       }
 
+      // init master query prefix string
+      
+      mQueryPrefixString = queryPrefixBuffer.toString();
+      
       // init master prefix table
       
       mPrefixTable = prefixTable;
@@ -247,6 +261,62 @@ public class Splink extends JFrame
     return uri;
   }
   
+  // add prefix area
+
+  TableCellRenderer mPrefixTableRenderer = new DefaultTableCellRenderer()
+  {
+    Color[] mPrefixRowColors = {
+      Color.WHITE,
+      new Color(255, 230, 220),
+      Color.WHITE,
+      new Color(235, 235, 235),
+    };
+    
+    public Component getTableCellRendererComponent(JTable table,
+      Object value, boolean isSelected, boolean hasFocus, int row, int column)
+    {
+      Component c =
+        super.getTableCellRendererComponent(table, value, isSelected,
+          hasFocus, row, column);
+
+      setHorizontalAlignment(column == 0
+        ? SwingConstants.CENTER
+        : SwingConstants.LEFT);
+
+      c.setForeground(column == 0
+        ? PREFIX_PREFIX_FONT_CLR.getColor()
+        : PREFIX_VALUE_FONT_CLR.getColor());
+
+      c.setBackground(mPrefixRowColors[row % mPrefixRowColors.length]);
+
+      return c;
+    }
+  };
+  
+  // add prefix area
+
+  TableCellRenderer mResultTableRenderer = new DefaultTableCellRenderer()
+  {
+    Color[] mResultRowColors = {
+      Color.WHITE,
+      new Color(235, 235, 255),
+      Color.WHITE,
+      new Color(235, 235, 235),
+    };
+    
+    public Component getTableCellRendererComponent(JTable table,
+      Object value, boolean isSelected, boolean hasFocus, int row, int column)
+    {
+      Component c =
+        super.getTableCellRendererComponent(table, value, isSelected,
+          hasFocus, row, column);
+
+      c.setBackground(mResultRowColors[row % mResultRowColors.length]);
+      
+      return c;
+    }
+  };
+  
   private void constructFrame(Container frame)
   {
     // configure frame
@@ -266,17 +336,27 @@ public class Splink extends JFrame
     mEditor = new JEditorPane();
     mEditor.setFont(EDITOR_FONT.getFont());
     mEditor.setForeground(EDITOR_FONT_CLR.getColor());
+    mEditor.getDocument().putProperty(PlainDocument.tabSizeAttribute,
+      EDITOR_TAB_SIZE.getInteger());
 
-    // add editor
-
-    mPrefix = new JTable();
+    mPrefix = new JTable()
+    {
+      public TableCellRenderer getCellRenderer(int row, int column) {
+        return mPrefixTableRenderer;
+      }
+    };
     mPrefix.setFont(PREFIX_FONT.getFont());
     mPrefix.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
-    mPrefix.setForeground(PREFIX_FONT_CLR.getColor());
-
+    
     // add result area
 
-    mResult = new JTable();
+    mResult = new JTable()
+    {
+      public TableCellRenderer getCellRenderer(int row, int column) {
+        return mResultTableRenderer;
+      }
+    };
+    
     mResult.setFont(RESULT_FONT.getFont());
     mResult.setForeground(RESUlT_FONT_CLR.getColor());
 
@@ -313,8 +393,10 @@ public class Splink extends JFrame
         EDITOR_SIZE.set(editScroll.getSize());
         PREFIX_SIZE.set(prefixScroll.getSize());
         RESULT_SIZE.set(resultScroll.getSize());
-        PREFIX_COL1_WIDTH.set(mPrefix.getColumnModel().getColumn(0).getWidth());
-        PREFIX_COL2_WIDTH.set(mPrefix.getColumnModel().getColumn(1).getWidth());
+        PREFIX_COL1_WIDTH.set(mPrefix.getColumnModel().getColumn(0)
+          .getWidth());
+        PREFIX_COL2_WIDTH.set(mPrefix.getColumnModel().getColumn(1)
+          .getWidth());
       }
     });
   }
@@ -326,7 +408,7 @@ public class Splink extends JFrame
     {
       public void run()
       {
-        performQuery(mEditor.getText());          
+        performQuery(mQueryPrefixString + mEditor.getText());          
       }
     }.start();
   }
