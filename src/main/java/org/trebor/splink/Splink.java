@@ -73,6 +73,8 @@ public class Splink extends JFrame
   private RepositoryConnection mConnection;
   private Map<String, String> mNameSpaceMap;
   private Stack<String> mQueryStack;
+  private String mLastQuery;
+
   
   
   enum Property
@@ -371,7 +373,7 @@ public class Splink extends JFrame
     JMenu query = new JMenu("Query");
     menuBar.add(query);
     query.add(mSubmiteQuery);
-    query.add(mPreviouseQuery);
+    query.add(mPreviousQuery);
 
     // add editor
 
@@ -498,14 +500,25 @@ public class Splink extends JFrame
     submitQuery(mEditor.getText(), true, true);
   }
 
+  private void pushQuery(String query)
+  {
+    if (null == mQueryStack)
+      mQueryStack = new Stack<String>();
+
+    if (null != mLastQuery)
+      mQueryStack.push(mLastQuery);
+    
+    mLastQuery = query;
+    
+    mPreviousQuery.setEnabled(!mQueryStack.isEmpty());
+  }
+  
   private void popQuery()
   {
     if (null != mQueryStack && !mQueryStack.isEmpty())
-    {
-      submitQuery(mQueryStack.pop(), false, false);
-      if (mQueryStack.isEmpty())
-        mPreviouseQuery.setEnabled(false);
-    }
+      submitQuery(mLastQuery = mQueryStack.pop(), false, false);
+
+    mPreviousQuery.setEnabled(!mQueryStack.isEmpty());
   }
   
   private void submitQuery(final String query, final boolean appendPrefix,
@@ -516,30 +529,24 @@ public class Splink extends JFrame
       : query;
     
     if (record)
-    {
-      if (null == mQueryStack)
-        mQueryStack = new Stack<String>();
-
-      mQueryStack.push(fullQuery);
-      mPreviouseQuery.setEnabled(true);
-    }
-    
+      pushQuery(fullQuery);
+          
     setMessage("Querying...");
     new Thread()
     {
       public void run()
       {
         boolean submitEnabled = mSubmiteQuery.isEnabled();
-        boolean previouseEnabled = mPreviouseQuery.isEnabled();
+        boolean previousEnabled = mPreviousQuery.isEnabled();
 
         mSubmiteQuery.setEnabled(false);
-        mPreviouseQuery.setEnabled(false);
+        mPreviousQuery.setEnabled(false);
 
         debugMessage(fullQuery);
         performQuery(fullQuery);
         
         mSubmiteQuery.setEnabled(submitEnabled);
-        mPreviouseQuery.setEnabled(previouseEnabled);
+        mPreviousQuery.setEnabled(previousEnabled);
       }
     }.start();
   }
@@ -681,7 +688,7 @@ public class Splink extends JFrame
     }
   };
   
-  private SplinkAction mPreviouseQuery = new SplinkAction("Previouse", getKeyStroke(VK_BACK_SPACE, CTRL_MASK),  "perform previouse query")
+  private SplinkAction mPreviousQuery = new SplinkAction("Previous", getKeyStroke(VK_BACK_SPACE, CTRL_MASK),  "perform previous query")
   {
     {
       setEnabled(false);
