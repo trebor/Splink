@@ -6,7 +6,7 @@
   <version>1.0-SNAPSHOT</version>
   <name>Splink</name>
   <url>http://maven.apache.org</url>
-  
+
   <organization>
     <name>trebor</name>
     <url>http://www.trebor.org</url>
@@ -114,6 +114,29 @@
           </execution>
         </executions>
       </plugin>
+
+      <plugin>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <configuration>
+          <descriptorRefs>
+            <descriptorRef>jar-with-dependencies</descriptorRef>
+          </descriptorRefs>
+          <archive>
+            <manifest>
+              <mainClass>org.trebor.splink.Splink</mainClass>
+            </manifest>
+          </archive>
+        </configuration>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
     </plugins>
 
     <pluginManagement>
