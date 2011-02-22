@@ -33,6 +33,7 @@ import java.awt.Rectangle;
 import java.awt.event.ActionEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
 import java.io.File;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -432,7 +433,15 @@ public class Splink extends JFrame
         return mResultTableRenderer;
       }
     };
-    mResult.addMouseListener(new MouseAdapter()
+    
+    
+    mResult.setFont(RESULT_FONT.getFont());
+    mResult.setForeground(RESULT_FONT_CLR.getColor());
+    mResult.setSelectionForeground(RESULT_FONT_CLR.getColor());
+    
+    // create the table mouse listener
+    
+    MouseListener ml = new MouseAdapter()
     {
       public void mouseClicked(MouseEvent e)
       {
@@ -440,14 +449,16 @@ public class Splink extends JFrame
           JTable target = (JTable)e.getSource();
           int row = target.getSelectedRow();
           int column = target.getSelectedColumn();
-          inspectResource(target.getModel().getValueAt(row, column).toString());
+          if (target == mResult)
+            inspectResource(target.getModel().getValueAt(row, column).toString());
+          if (target == mPrefix)
+            inspectPrefix(target.getModel().getValueAt(row, 0).toString() + ":");
         }
       }
-    });
+    };
     
-    mResult.setFont(RESULT_FONT.getFont());
-    mResult.setForeground(RESULT_FONT_CLR.getColor());
-    mResult.setSelectionForeground(RESULT_FONT_CLR.getColor());
+    mResult.addMouseListener(ml);
+    mPrefix.addMouseListener(ml);
 
     // add output
 
@@ -514,6 +525,19 @@ public class Splink extends JFrame
       "SELECT * " +
       "WHERE { ?subject ?predicate ?object " +
       "FILTER (?subject = <%s> || ?predicate = <%s> || ?object = <%s>) }", longUri, longUri, longUri);
+    submitQuery(query, true, true);
+  }
+  
+  private void inspectPrefix(String prefix)
+  {
+    String query = String.format(
+      "SELECT * " +
+      "WHERE { ?subject ?predicate ?object " +
+      "FILTER (" +
+      "     regex(str(?subject  ), str(%s)) " +
+//      "  || regex(str(?predicate), str(%s)) " +
+//      "  || regex(str(?object   ), str(%s)) " +
+      ")}", prefix, prefix, prefix);    
     submitQuery(query, true, true);
   }
   
