@@ -44,6 +44,7 @@ import java.util.Stack;
 import java.util.Vector;
 
 import javax.swing.AbstractAction;
+import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JEditorPane;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -90,6 +91,7 @@ public class Splink extends JFrame
   private JTable mResult;
   private JTextArea mErrorText;
   private JLabel mOutput;
+  private JCheckBoxMenuItem mShowLongUriCbmi;
   private TableModel mPrefixTable;
   private String mQueryPrefixString;
   private Repository mRepository;
@@ -393,10 +395,14 @@ public class Splink extends JFrame
 
     JMenuBar menuBar = new JMenuBar();
     setJMenuBar(menuBar);
-    JMenu query = new JMenu("Query");
-    menuBar.add(query);
-    query.add(mSubmiteQuery);
-    query.add(mPreviousQuery);
+    JMenu queryMenu = new JMenu("Query");
+    menuBar.add(queryMenu);
+    queryMenu.add(mSubmiteQuery);
+    queryMenu.add(mPreviousQuery);
+    
+    JMenu optionMenu = new JMenu("Options");
+    menuBar.add(optionMenu);
+    optionMenu.add(mShowLongUriCbmi = new JCheckBoxMenuItem(mShowLongUri));
 
     // add editor
 
@@ -568,13 +574,13 @@ public class Splink extends JFrame
   }
   
   private void submitQuery(final String query, final boolean appendPrefix,
-    boolean record)
+    boolean pushQuery)
   {
     final String fullQuery = appendPrefix
       ? mQueryPrefixString + query
       : query;
     
-    if (record)
+    if (pushQuery)
       pushQuery(fullQuery);
           
     setMessage("Querying...");
@@ -589,7 +595,7 @@ public class Splink extends JFrame
         mPreviousQuery.setEnabled(false);
 
         debugMessage(fullQuery);
-        performQuery(fullQuery);
+        performQuery(fullQuery, true);
         
         mSubmiteQuery.setEnabled(submitEnabled);
         mPreviousQuery.setEnabled(previousEnabled);
@@ -598,13 +604,14 @@ public class Splink extends JFrame
   }
   
   
-  public void performQuery(String queryString)
+  public void performQuery(String queryString, boolean includeInffered)
   {
     try
     {
       long startTime = System.currentTimeMillis();
       TupleQuery query = mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
       TupleQueryResult result = query.evaluate();
+      query.setIncludeInferred(includeInffered);
 
       // create the table model
       
@@ -626,7 +633,12 @@ public class Splink extends JFrame
         Vector<String> row = new Vector<String>();
         Iterator<Binding> rowData = result.next().iterator();
         while (rowData.hasNext())
-          row.add(shortUri(rowData.next().getValue().toString()));
+        {
+          String uri = rowData.next().getValue().toString();
+          if (!mShowLongUriCbmi.getState())
+            uri = shortUri(uri);
+          row.add(uri);
+        }
         tm.addRow(row);
       }
       
@@ -745,4 +757,13 @@ public class Splink extends JFrame
       popQuery();
     }
   };
+  
+  private SplinkAction mShowLongUri = new SplinkAction("Long URI", getKeyStroke(VK_L, CTRL_MASK),  "show result URIs in long form")
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      if (null != mLastQuery)
+        submitQuery(mLastQuery, false, false);
+    }
+  };  
 }
