@@ -103,7 +103,7 @@ public class Splink extends JFrame
   {
     SESAME_HOST("sesame.host", String.class, "localhost"),
     SESAME_PORT("sesame.port", Integer.class, 8080),
-    SESAME_REPOSITORY("sesame.repository", String.class, "test"),
+    SESAME_REPOSITORY("sesame.repository", String.class, "<your-repo-name>"),
 
     CURRENT_QUERY("current.query", String.class, "SELECT\n\t*\nWHERE\n{\n\t?s ?p ?o\n}"),
     
@@ -610,7 +610,7 @@ public class Splink extends JFrame
 
       mResult.setModel(tm);
       setResultComponent(mResult);
-      setMessage("seconds: %2.2f cols: %d, rows: %d", (System.currentTimeMillis() - startTime) / 1000.f, tm.getColumnCount(), tm.getRowCount());
+      setMessage("seconds: %2.2f, cols: %d, rows: %d", (System.currentTimeMillis() - startTime) / 1000.f, tm.getColumnCount(), tm.getRowCount());
     }
     catch (Exception e)
     {
