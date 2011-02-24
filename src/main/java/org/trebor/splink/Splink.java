@@ -37,19 +37,23 @@ import java.awt.event.MouseListener;
 import java.io.File;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Stack;
 import java.util.Vector;
 
 import javax.swing.AbstractAction;
+import javax.swing.ButtonGroup;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JEditorPane;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
+import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
@@ -65,6 +69,7 @@ import javax.swing.text.PlainDocument;
 
 import org.openrdf.model.Namespace;
 import org.openrdf.query.Binding;
+import org.openrdf.query.QueryEvaluationException;
 import org.openrdf.query.QueryLanguage;
 import org.openrdf.query.TupleQuery;
 import org.openrdf.query.TupleQueryResult;
@@ -90,7 +95,9 @@ public class Splink extends JFrame
   private JScrollPane mResultArea;
   private JTable mResult;
   private JTextArea mErrorText;
+  private JMenu mRepositoryListMenu;
   private JLabel mOutput;
+  private List<String> mRepositoryList;
   private JCheckBoxMenuItem mShowLongUriCbmi;
   private TableModel mPrefixTable;
   private String mQueryPrefixString;
@@ -106,7 +113,7 @@ public class Splink extends JFrame
   {
     SESAME_HOST("sesame.host", String.class, "localhost"),
     SESAME_PORT("sesame.port", Integer.class, 8080),
-    SESAME_REPOSITORY("sesame.repository", String.class, "<your-repo-name>"),
+    SESAME_REPOSITORY("sesame.repository", String.class, "SYSTEM"),
 
     CURRENT_QUERY("current.query", String.class, "SELECT\n\t*\nWHERE\n{\n\t?s ?p ?o\n}"),
     
@@ -220,18 +227,75 @@ public class Splink extends JFrame
   {
     initializeProperities();
     constructFrame(getContentPane());
-    connectToRepository();
+    initializeRepositoryList();
+    initializeRepository(SESAME_REPOSITORY.getString());
   }
 
-  private void connectToRepository()
+  private void initializeRepositoryList()
+  {
+    initializeRepository("SYSTEM");
+    
+    String query = mQueryPrefixString +  "SELECT ?o WHERE {?_ sys:repositoryID ?o}";
+    
+    performQuery(query, false, new QueryResultsProcessor()
+    {
+      public int process(TupleQueryResult result)
+        throws QueryEvaluationException
+      {
+        // extract repository list
+
+        mRepositoryList = new ArrayList<String>();
+        String columnName = result.getBindingNames().get(0);
+        while (result.hasNext())
+          mRepositoryList.add(result.next().getValue(columnName)
+            .stringValue());
+
+        // populate the repository menu
+
+        boolean found = false;
+        ButtonGroup radioButtonGroup = new ButtonGroup();
+        mRepositoryListMenu.removeAll();
+        for (final String repositoryName : mRepositoryList)
+        {
+          JRadioButtonMenuItem button =
+            new JRadioButtonMenuItem(new AbstractAction(repositoryName)
+            {
+              public void actionPerformed(ActionEvent arg0)
+              {
+                initializeRepository(repositoryName);
+                SESAME_REPOSITORY.set(repositoryName);
+              }
+            });
+
+          if (SESAME_REPOSITORY.getString().equals(repositoryName))
+          {
+            button.setSelected(true);
+            found = true;
+          }
+
+          radioButtonGroup.add(button);
+          mRepositoryListMenu.add(button);
+        }
+
+        // if the repository in the properties is not in the store, default
+        // to one in the store
+
+        if (!found)
+          SESAME_REPOSITORY.set(mRepositoryList.get(0));
+
+        return mRepositoryList.size();
+      }
+    });
+  }
+  
+  private void initializeRepository(String repositoryName)
   {
     try
     {
       mRepository =
         new HTTPRepository(String.format("http://%s:%d/openrdf-sesame",
-          SESAME_HOST.getString(), SESAME_PORT.getInteger()),
-          SESAME_REPOSITORY.getString());
-      
+          SESAME_HOST.getString(), SESAME_PORT.getInteger()), repositoryName);
+
       mRepository.initialize();
       mConnection = mRepository.getConnection();
       initializeNameSpace();
@@ -254,6 +318,8 @@ public class Splink extends JFrame
   {
     try
     {
+      setMessage("initializing namespace...");
+      
       // init name-space map and a buffer to build the query prefix string
       
       mNameSpaceMap = new HashMap<String, String>();
@@ -295,6 +361,8 @@ public class Splink extends JFrame
         mPrefix.getColumnModel().getColumn(0).setPreferredWidth(PREFIX_COL1_WIDTH.getInteger());
         mPrefix.getColumnModel().getColumn(1).setPreferredWidth(PREFIX_COL2_WIDTH.getInteger());
       }
+      
+      setMessage("initialized namespace.");
     }
     catch (Exception e)
     {
@@ -395,10 +463,23 @@ public class Splink extends JFrame
 
     JMenuBar menuBar = new JMenuBar();
     setJMenuBar(menuBar);
+
+    // store menu
+
+    JMenu storeMenu = new JMenu("Store");
+    menuBar.add(storeMenu);
+    storeMenu.add(mReloadNameSpace);
+    mRepositoryListMenu = new JMenu("Repositories");
+    storeMenu.add(mRepositoryListMenu);
+
+    // query menu
+    
     JMenu queryMenu = new JMenu("Query");
     menuBar.add(queryMenu);
     queryMenu.add(mSubmiteQuery);
     queryMenu.add(mPreviousQuery);
+    
+    // options menu
     
     JMenu optionMenu = new JMenu("Options");
     menuBar.add(optionMenu);
@@ -439,8 +520,7 @@ public class Splink extends JFrame
         return mResultTableRenderer;
       }
     };
-    
-    
+
     mResult.setFont(RESULT_FONT.getFont());
     mResult.setForeground(RESULT_FONT_CLR.getColor());
     mResult.setSelectionForeground(RESULT_FONT_CLR.getColor());
@@ -595,7 +675,7 @@ public class Splink extends JFrame
         mPreviousQuery.setEnabled(false);
 
         debugMessage(fullQuery);
-        performQuery(fullQuery, true);
+        performQuery(fullQuery, true, mDefaultResultsProcessor);
         
         mSubmiteQuery.setEnabled(submitEnabled);
         mPreviousQuery.setEnabled(previousEnabled);
@@ -603,16 +683,15 @@ public class Splink extends JFrame
     }.start();
   }
   
-  
-  public void performQuery(String queryString, boolean includeInffered)
+  public interface QueryResultsProcessor
   {
-    try
+    int process(TupleQueryResult result) throws QueryEvaluationException;
+  }
+  
+  private QueryResultsProcessor mDefaultResultsProcessor = new QueryResultsProcessor()
+  {
+    public int process(TupleQueryResult result) throws QueryEvaluationException
     {
-      long startTime = System.currentTimeMillis();
-      TupleQuery query = mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
-      TupleQueryResult result = query.evaluate();
-      query.setIncludeInferred(includeInffered);
-
       // create the table model
       
       DefaultTableModel tm = new DefaultTableModel()
@@ -646,11 +725,32 @@ public class Splink extends JFrame
 
       mResult.setModel(tm);
       setResultComponent(mResult);
-      setMessage("seconds: %2.2f, cols: %d, rows: %d", (System.currentTimeMillis() - startTime) / 1000.f, tm.getColumnCount(), tm.getRowCount());
+      
+      // return row count
+      
+      return tm.getRowCount();
+    }
+  };
+  
+  public void performQuery(String queryString, boolean includeInffered,
+    QueryResultsProcessor resultProcessor)
+  {
+    try
+    {
+      long startTime = System.currentTimeMillis();
+      TupleQuery query =
+        mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
+      query.setIncludeInferred(includeInffered);
+      TupleQueryResult result = query.evaluate();
+      int rows = resultProcessor.process(result);
+      int columns = result.getBindingNames().size();
+      setMessage("seconds: %2.2f, cols: %d, rows: %d",
+        (System.currentTimeMillis() - startTime) / 1000.f, columns, rows);
     }
     catch (Exception e)
     {
-      setError(e, "------ query ------\n\n%s\n\n-------------------\n", queryString);
+      setError(e, "------ query ------\n\n%s\n\n-------------------\n",
+        queryString);
     }
   }
 
@@ -766,4 +866,13 @@ public class Splink extends JFrame
         submitQuery(mLastQuery, false, false);
     }
   };  
+
+  private SplinkAction mReloadNameSpace = new SplinkAction("Reload Namespace", getKeyStroke(VK_N, META_MASK),  "reload the namespace values")
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      initializeNameSpace();
+    }
+  };  
+
 }
