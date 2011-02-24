@@ -89,6 +89,8 @@ public class Splink extends JFrame
 {
   public static final String PROPERTIES_FILE = System.getProperty("user.home") + File.separator + ".splink";
 
+  private static final Object DEVELOPER_EMAIL_ADDRESS = "trebor@trebor.org";
+
   private Properties mProperties;
   private JEditorPane mEditor;
   private JTable mPrefix;
@@ -606,11 +608,24 @@ public class Splink extends JFrame
   
   private void inspectResource(String uri)
   {
-    String longUri = longUri(uri);
-    String query = String.format(
-      "SELECT * " +
-      "WHERE { ?subject ?predicate ?object " +
-      "FILTER (?subject = <%s> || ?predicate = <%s> || ?object = <%s>) }", longUri, longUri, longUri);
+    if (uri.startsWith("_"))
+    {
+      setError(
+        "sorry you can't inspect blank nodes like\n\n   %s\n\n, if you now how" +
+        "to make a query which CAN ispect such nodes email me %s, " +
+        "and we'll work it out.",
+        uri, DEVELOPER_EMAIL_ADDRESS);
+      return;
+    }
+
+    String longUri = uri.startsWith("\"") ? uri : "<" + longUri(uri) + ">";
+    String query =
+      String
+        .format(
+          "SELECT * "
+            + "WHERE { ?subject ?predicate ?object "
+            + "FILTER (?subject = %s || ?predicate = %s || ?object = %s) }",
+          longUri, longUri, longUri);
     submitQuery(query, true, true);
   }
   
@@ -620,9 +635,9 @@ public class Splink extends JFrame
       "SELECT * " +
       "WHERE { ?subject ?predicate ?object " +
       "FILTER (" +
-      "     regex(str(?subject  ), str(%s)) " +
+      "  regex(str(?subject  ), str(%s)) " +
 //      "  || regex(str(?predicate), str(%s)) " +
-//      "  || regex(str(?object   ), str(%s)) " +
+      "  || regex(str(?object   ), str(%s)) " +
       ")}", prefix, prefix, prefix);    
     submitQuery(query, true, true);
   }
