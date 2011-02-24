@@ -620,7 +620,7 @@ public class Splink extends JFrame
       return;
     }
 
-    String longUri = uri.startsWith("\"") ? uri : "<" + longUri(uri) + ">";
+    String longUri = uri.startsWith("\"") ? "\"\"" + uri + "\"\"" : "<" + longUri(uri) + ">";
     String query =
       String
         .format(
