@@ -611,9 +611,11 @@ public class Splink extends JFrame
     if (uri.startsWith("_"))
     {
       setError(
-        "sorry you can't inspect blank nodes like\n\n   %s\n\n, if you now how" +
-        "to make a query which CAN ispect such nodes email me %s, " +
-        "and we'll work it out.",
+        "sorry you can't inspect blank nodes like:" +
+        "\n\n   %s\n\nif you now how " +
+        "to make a query which CAN\n" +
+        "ispect such nodes email me [%s],\n" +
+        "and we'll work something out.",
         uri, DEVELOPER_EMAIL_ADDRESS);
       return;
     }
