@@ -56,6 +56,7 @@ import javax.swing.JMenuBar;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
+import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.KeyStroke;
@@ -88,11 +89,14 @@ import static java.lang.String.format;
 public class Splink extends JFrame
 {
   public static final String PROPERTIES_FILE = System.getProperty("user.home") + File.separator + ".splink";
-
   private static final Object DEVELOPER_EMAIL_ADDRESS = "trebor@trebor.org";
+  protected static final String DEFAULT_QUERY = "SELECT\n\t*\nWHERE\n{\n\t?s ?p ?o\n}";
+  private static final String QUERY_NAME_KEY_BASE = "query.name.";
+  private static final String QUERY_VALUE_KEY_BASE = "query.value.";
 
   private Properties mProperties;
-  private JEditorPane mEditor;
+  private JScrollPane mPrefixScroll;
+  private JTabbedPane mEditorTab;
   private JTable mPrefix;
   private JScrollPane mResultArea;
   private JTable mResult;
@@ -108,8 +112,6 @@ public class Splink extends JFrame
   private Map<String, String> mNameSpaceMap;
   private Stack<String> mQueryStack;
   private String mLastQuery;
-
-  
   
   enum Property
   {
@@ -117,13 +119,12 @@ public class Splink extends JFrame
     SESAME_PORT("sesame.port", Integer.class, 8080),
     SESAME_REPOSITORY("sesame.repository", String.class, "SYSTEM"),
 
-    CURRENT_QUERY("current.query", String.class, "SELECT\n\t*\nWHERE\n{\n\t?s ?p ?o\n}"),
-    
     EDITOR_SIZE("gui.editor.size", Dimension.class, new Dimension(300, 250)), 
     EDITOR_FONT("gui.editor.font", Font.class, new Font("Courier", Font.BOLD, 18)),
     EDITOR_FONT_CLR("gui.editor.color", Color.class, Color.DARK_GRAY),
     EDITOR_TAB_SIZE("gui.editor.tabsize", Integer.class, 2),
-  
+    EDITOR_CURRENT_QUERY("gui.editor.current-query", Integer.class, 0),
+    
     PREFIX_SIZE("gui.prefix.size", Dimension.class, new Dimension(600, 250)), 
     PREFIX_FONT("gui.prefix.font", Font.class, new Font("Courier", Font.BOLD, 18)),
     PREFIX_PREFIX_FONT_CLR("gui.prefix.prefix.color", Color.class, Color.DARK_GRAY),
@@ -239,20 +240,20 @@ public class Splink extends JFrame
     
     String query = mQueryPrefixString +  "SELECT ?o WHERE {?_ sys:repositoryID ?o}";
     
+    // extract repository list
     performQuery(query, false, new QueryResultsProcessor()
     {
       public int process(TupleQueryResult result)
         throws QueryEvaluationException
       {
-        // extract repository list
 
         mRepositoryList = new ArrayList<String>();
         String columnName = result.getBindingNames().get(0);
         while (result.hasNext())
+          // populate the repository menu
           mRepositoryList.add(result.next().getValue(columnName)
             .stringValue());
 
-        // populate the repository menu
 
         boolean found = false;
         ButtonGroup radioButtonGroup = new ButtonGroup();
@@ -301,6 +302,12 @@ public class Splink extends JFrame
       mRepository.initialize();
       mConnection = mRepository.getConnection();
       initializeNameSpace();
+      
+      // set frame title
+      
+      setTitle(String.format("http://%s:%d/openrdf-sesame/%s",
+        SESAME_HOST.getString(), SESAME_PORT.getInteger(),
+        repositoryName));
     }
     catch (RepositoryException e)
     {
@@ -312,6 +319,9 @@ public class Splink extends JFrame
   {
     mProperties = new Properties(PROPERTIES_FILE);
     Property.initialize(mProperties);
+
+    // initialize the queries which are being edited
+    
     for (Object key: mProperties.keySet())
       debugMessage("%s: %s", key, mProperties.get(key));
   }  
@@ -475,50 +485,74 @@ public class Splink extends JFrame
     storeMenu.add(mRepositoryListMenu);
 
     // query menu
-    
+
     JMenu queryMenu = new JMenu("Query");
     menuBar.add(queryMenu);
     queryMenu.add(mSubmiteQuery);
     queryMenu.add(mPreviousQuery);
-    
+    queryMenu.add(mNewQueryTab);
+    queryMenu.add(mQueryLeft);
+    queryMenu.add(mQueryRight);
+    queryMenu.add(mQueryRemoveTab);
+
     // options menu
-    
+
     JMenu optionMenu = new JMenu("Options");
     menuBar.add(optionMenu);
     optionMenu.add(mShowLongUriCbmi = new JCheckBoxMenuItem(mShowLongUri));
 
-    // add editor
+    // create the editor tabbed pane
 
-    mEditor = new JEditorPane();
-    mEditor.setFont(EDITOR_FONT.getFont());
-    mEditor.setForeground(EDITOR_FONT_CLR.getColor());
-    mEditor.getDocument().putProperty(PlainDocument.tabSizeAttribute,
-      EDITOR_TAB_SIZE.getInteger());
-    mEditor.setText(CURRENT_QUERY.getString());
+    mEditorTab = new JTabbedPane();
+
+    // add editors
+
+    boolean done = false;
+    for (int i = 0; !done; ++i)
+    {
+      String queryName = mProperties.getProperty(QUERY_NAME_KEY_BASE + i);
+      String queryValue = mProperties.getProperty(QUERY_VALUE_KEY_BASE + i);
+
+      if (null != queryName && null != queryValue)
+        addEditor(queryName, queryValue);
+      else
+        done = true;
+    }
+
+    // if no editors create a new one
     
+    if (0 == mEditorTab.getComponentCount())
+      addNewEditor();
+    
+    // be sure we select the last editor being edited at
+    
+    mEditorTab.setSelectedIndex(EDITOR_CURRENT_QUERY.getInteger());
+
     // create prefix table
-    
+
     mPrefix = new JTable()
     {
-      public TableCellRenderer getCellRenderer(int row, int column) {
+      public TableCellRenderer getCellRenderer(int row, int column)
+      {
         return mPrefixTableRenderer;
       }
     };
     mPrefix.setFont(PREFIX_FONT.getFont());
     mPrefix.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
-    
+
     // create error text area
-    
+
     mErrorText = new JTextArea();
     mErrorText.setFont(ERROR_FONT.getFont());
     mErrorText.setForeground(ERROR_FONT_CLR.getColor());
     mErrorText.setEditable(false);
-    
+
     // create result table
 
     mResult = new JTable()
     {
-      public TableCellRenderer getCellRenderer(int row, int column) {
+      public TableCellRenderer getCellRenderer(int row, int column)
+      {
         return mResultTableRenderer;
       }
     };
@@ -526,25 +560,28 @@ public class Splink extends JFrame
     mResult.setFont(RESULT_FONT.getFont());
     mResult.setForeground(RESULT_FONT_CLR.getColor());
     mResult.setSelectionForeground(RESULT_FONT_CLR.getColor());
-    
+
     // create the table mouse listener
-    
+
     MouseListener ml = new MouseAdapter()
     {
       public void mouseClicked(MouseEvent e)
       {
-        if (e.getClickCount() == 2) {
+        if (e.getClickCount() == 2)
+        {
           JTable target = (JTable)e.getSource();
           int row = target.getSelectedRow();
           int column = target.getSelectedColumn();
           if (target == mResult)
-            inspectResource(target.getModel().getValueAt(row, column).toString());
+            inspectResource(target.getModel().getValueAt(row, column)
+              .toString());
           if (target == mPrefix)
-            inspectPrefix(target.getModel().getValueAt(row, 0).toString() + ":");
+            inspectPrefix(target.getModel().getValueAt(row, 0).toString() +
+              ":");
         }
       }
     };
-    
+
     mResult.addMouseListener(ml);
     mPrefix.addMouseListener(ml);
 
@@ -554,17 +591,16 @@ public class Splink extends JFrame
 
     // compose all the elements into the display
 
-    final JScrollPane editScroll = new JScrollPane(mEditor);
-    editScroll.setPreferredSize(EDITOR_SIZE.getDimension());
+    mEditorTab.setPreferredSize(EDITOR_SIZE.getDimension());
 
-    final JScrollPane prefixScroll = new JScrollPane(mPrefix);
-    prefixScroll.setPreferredSize(PREFIX_SIZE.getDimension());
+    mPrefixScroll = new JScrollPane(mPrefix);
+    mPrefixScroll.setPreferredSize(PREFIX_SIZE.getDimension());
 
     mResultArea = new JScrollPane(mResult);
     mResultArea.setPreferredSize(RESULT_SIZE.getDimension());
     JSplitPane split =
       new JSplitPane(JSplitPane.VERTICAL_SPLIT, new JSplitPane(
-        JSplitPane.HORIZONTAL_SPLIT, editScroll, prefixScroll), mResultArea);
+        JSplitPane.HORIZONTAL_SPLIT, mEditorTab, mPrefixScroll), mResultArea);
     frame.add(split, BorderLayout.CENTER);
     frame.add(mOutput, BorderLayout.SOUTH);
 
@@ -578,27 +614,34 @@ public class Splink extends JFrame
     {
       public void run()
       {
-        EDITOR_SIZE.set(editScroll.getSize());
-        PREFIX_SIZE.set(prefixScroll.getSize());
-        RESULT_SIZE.set(mResultArea.getSize());
-        PREFIX_COL1_WIDTH.set(mPrefix.getColumnModel().getColumn(0)
-          .getWidth());
-        PREFIX_COL2_WIDTH.set(mPrefix.getColumnModel().getColumn(1)
-          .getWidth());
-        CURRENT_QUERY.set(mEditor.getText());
+        shutdownHook();
       }
     });
-    
-    // set frame title
-    
-    setTitle(String.format("http://%s:%d/openrdf-sesame/%s",
-      SESAME_HOST.getString(), SESAME_PORT.getInteger(),
-      SESAME_REPOSITORY.getString()));
 
-    // make frame visible
+    // update the enabled state of our actions
     
+    updateEnabled();
+    
+    // make frame visible
+
     pack();
     setVisible(true);
+  }
+
+  private void addEditor(String name, String query)
+  {
+    JEditorPane editor = new JEditorPane();    
+    editor.setFont(EDITOR_FONT.getFont());
+    editor.setForeground(EDITOR_FONT_CLR.getColor());
+    editor.getDocument().putProperty(PlainDocument.tabSizeAttribute,
+      EDITOR_TAB_SIZE.getInteger());
+    editor.setText(query);
+    JScrollPane scroll = new JScrollPane(editor);
+    mEditorTab.add(scroll);
+    mEditorTab.setSelectedComponent(scroll);
+    int index = mEditorTab.getSelectedIndex();
+    mEditorTab.setTitleAt(index, name);
+    updateEnabled();
   }
 
   public void setResultComponent(Component c)
@@ -646,7 +689,14 @@ public class Splink extends JFrame
   
   private void submitQuery()
   {
-    submitQuery(mEditor.getText(), true, true);
+    submitQuery(getCurrentQuery(), true, true);
+  }
+  
+  private String getCurrentQuery()
+  {
+    JScrollPane scroll = (JScrollPane)mEditorTab.getSelectedComponent();
+    JEditorPane editor = (JEditorPane)scroll.getViewport().getView();
+    return editor.getText();
   }
 
   private void pushQuery(String query)
@@ -892,4 +942,101 @@ public class Splink extends JFrame
     }
   };  
 
+  private SplinkAction mNewQueryTab = new SplinkAction("New Query", getKeyStroke(VK_T, META_MASK),  "create a new query editor tab")
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      addNewEditor();
+    }
+  };  
+  
+  private SplinkAction mQueryLeft = new SplinkAction("Left Query", getKeyStroke(VK_LEFT, META_MASK + ALT_MASK),  "select next query to the left")
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      mEditorTab.setSelectedIndex(mEditorTab.getSelectedIndex() - 1);
+      updateEnabled();
+    }
+  };
+  
+  private SplinkAction mQueryRight = new SplinkAction("Right Query", getKeyStroke(VK_RIGHT, META_MASK + ALT_MASK),  "select next query to the right")
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      mEditorTab.setSelectedIndex(mEditorTab.getSelectedIndex() + 1);
+      updateEnabled();
+    }
+  };
+
+  private SplinkAction mQueryRemoveTab = new SplinkAction("Remove Current Query", null,  "remove currently visible query editor tab")
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      mEditorTab.remove(mEditorTab.getSelectedIndex());
+      updateEnabled();
+    }
+  };
+
+  protected void updateEnabled()
+  {
+    int selected = mEditorTab.getSelectedIndex();
+    int count = mEditorTab.getTabCount();
+    
+    mQueryRemoveTab.setEnabled(count > 0);
+    mQueryLeft.setEnabled(selected > 0);
+    mQueryRight.setEnabled(selected < count - 1);
+  }
+
+  private void addNewEditor()
+  {
+    addEditor(NameGenerator.getName(2, NameGenerator.INITIAL_CASE_SPACE), DEFAULT_QUERY);
+  }
+
+  private void shutdownHook()
+  {
+    EDITOR_SIZE.set(mEditorTab.getSize());
+    PREFIX_SIZE.set(mPrefixScroll.getSize());
+    RESULT_SIZE.set(mResultArea.getSize());
+    PREFIX_COL1_WIDTH.set(mPrefix.getColumnModel().getColumn(0)
+      .getWidth());
+    PREFIX_COL2_WIDTH.set(mPrefix.getColumnModel().getColumn(1)
+      .getWidth());
+
+    // expunge old edior state
+    
+    boolean done = false;
+    for (int i = 0; !done; ++i)
+    {
+      String queryNameKey = QUERY_NAME_KEY_BASE + i;
+      String queryValueKey = QUERY_VALUE_KEY_BASE + i;
+
+      done = true;
+      
+      if (null != mProperties.getProperty(queryNameKey))
+      {
+        mProperties.remove(queryNameKey);
+        done = false;
+      }
+      
+      if (null != mProperties.getProperty(queryValueKey))
+      {
+        mProperties.remove(queryValueKey);
+        done = false;
+      }
+    }      
+
+    // store the query editors
+
+    for (int i = 0; i < mEditorTab.getComponentCount(); ++i)
+    {
+      JScrollPane scroll = (JScrollPane)mEditorTab.getComponent(i);
+      JEditorPane editor = (JEditorPane)scroll.getViewport().getView();
+      mProperties.setProperty(QUERY_NAME_KEY_BASE + i, mEditorTab.getTitleAt(i));
+      mProperties.setProperty(QUERY_VALUE_KEY_BASE + i, editor.getText());
+    }
+    
+    EDITOR_CURRENT_QUERY.set(mEditorTab.getSelectedIndex());
+  }  
 }
+
+
