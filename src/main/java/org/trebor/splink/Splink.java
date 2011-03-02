@@ -476,6 +476,12 @@ public class Splink extends JFrame
     JMenuBar menuBar = new JMenuBar();
     setJMenuBar(menuBar);
 
+    // file menu
+    
+    JMenu fileMenu = new JMenu("File");
+    menuBar.add(fileMenu);
+    fileMenu.add(mSave);
+    
     // store menu
 
     JMenu storeMenu = new JMenu("Store");
@@ -977,6 +983,14 @@ public class Splink extends JFrame
     }
   };
 
+  private SplinkAction mSave = new SplinkAction("Save", getKeyStroke(VK_S, META_MASK),  "save the state of all of the current query editors and frame sizes")
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      shutdownHook();
+    }
+  };
+  
   protected void updateEnabled()
   {
     int selected = mEditorTab.getSelectedIndex();
@@ -994,6 +1008,8 @@ public class Splink extends JFrame
 
   private void shutdownHook()
   {
+    // save frame sizes
+    
     EDITOR_SIZE.set(mEditorTab.getSize());
     PREFIX_SIZE.set(mPrefixScroll.getSize());
     RESULT_SIZE.set(mResultArea.getSize());
