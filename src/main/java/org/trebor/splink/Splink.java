@@ -30,6 +30,7 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -62,6 +63,8 @@ import javax.swing.JTextArea;
 import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
 import javax.swing.ToolTipManager;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ChangeListener;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellRenderer;
@@ -494,6 +497,7 @@ public class Splink extends JFrame
 
     JMenu queryMenu = new JMenu("Query");
     menuBar.add(queryMenu);
+    queryMenu.add(mQueryCopy);
     queryMenu.add(mSubmiteQuery);
     queryMenu.add(mPreviousQuery);
     queryMenu.add(mNewQueryTab);
@@ -510,6 +514,13 @@ public class Splink extends JFrame
     // create the editor tabbed pane
 
     mEditorTab = new JTabbedPane();
+    mEditorTab.addChangeListener(new ChangeListener()
+    {
+      public void stateChanged(ChangeEvent arg0)
+      {
+        updateEnabled();
+      }
+    });
 
     // add editors
 
@@ -533,7 +544,7 @@ public class Splink extends JFrame
     // be sure we select the last editor being edited at
     
     mEditorTab.setSelectedIndex(EDITOR_CURRENT_QUERY.getInteger());
-
+    
     // create prefix table
 
     mPrefix = new JTable()
@@ -632,6 +643,12 @@ public class Splink extends JFrame
 
     pack();
     setVisible(true);
+    
+    // request focus for current editor
+    
+    JScrollPane scroll = (JScrollPane)mEditorTab.getSelectedComponent();
+    JEditorPane editor = (JEditorPane)scroll.getViewport().getView();
+    editor.requestFocus();
   }
 
   private void addEditor(String name, String query)
@@ -983,6 +1000,16 @@ public class Splink extends JFrame
     }
   };
 
+  private SplinkAction mQueryCopy = new SplinkAction("Copy Query", getKeyStroke(VK_C, META_MASK + SHIFT_MASK),  "copy current query to system clipboard")
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      StringSelection ss = new StringSelection(mQueryPrefixString + "\n" + getCurrentQuery());
+      getToolkit().getSystemClipboard().setContents(ss, null);
+    }
+  };
+  
+  
   private SplinkAction mSave = new SplinkAction("Save", getKeyStroke(VK_S, META_MASK),  "save the state of all of the current query editors and frame sizes")
   {
     public void actionPerformed(ActionEvent e)
