@@ -54,6 +54,8 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
+import javax.swing.JPopupMenu;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
@@ -69,9 +71,11 @@ import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableModel;
+import javax.swing.text.BadLocationException;
 import javax.swing.text.PlainDocument;
 
 import org.openrdf.model.Namespace;
+import org.openrdf.model.Resource;
 import org.openrdf.query.Binding;
 import org.openrdf.query.QueryEvaluationException;
 import org.openrdf.query.QueryLanguage;
@@ -99,22 +103,29 @@ public class Splink extends JFrame
 
   private Properties mProperties;
   private JScrollPane mPrefixScroll;
+  private JScrollPane mContextScroll;
   private JTabbedPane mEditorTab;
   private JTable mPrefix;
+  private JTable mContext;
   private JScrollPane mResultArea;
   private JTable mResult;
   private JTextArea mErrorText;
   private JMenu mRepositoryListMenu;
-  private JLabel mOutput;
+  private JLabel mStatusBar;
   private List<String> mRepositoryList;
   private JCheckBoxMenuItem mShowLongUriCbmi;
   private TableModel mPrefixTable;
+  private TableModel mContextTable;
   private String mQueryPrefixString;
   private Repository mRepository;
   private RepositoryConnection mConnection;
   private Map<String, String> mNameSpaceMap;
   private Stack<String> mQueryStack;
   private String mLastQuery;
+  private JPopupMenu mTablePopupMenu;
+  private JTable mPopupTable;
+  private int mPopupTableRow;
+  private int mPopupTableColumn;
   
   enum Property
   {
@@ -128,13 +139,17 @@ public class Splink extends JFrame
     EDITOR_TAB_SIZE("gui.editor.tabsize", Integer.class, 2),
     EDITOR_CURRENT_QUERY("gui.editor.current-query", Integer.class, 0),
     
-    PREFIX_SIZE("gui.prefix.size", Dimension.class, new Dimension(600, 250)), 
+    PREFIX_SIZE("gui.prefix.size", Dimension.class, new Dimension(600, 125)), 
     PREFIX_FONT("gui.prefix.font", Font.class, new Font("Courier", Font.BOLD, 18)),
     PREFIX_PREFIX_FONT_CLR("gui.prefix.prefix.color", Color.class, Color.DARK_GRAY),
     PREFIX_VALUE_FONT_CLR("gui.prefix.value.color", Color.class, Color.GRAY),
     PREFIX_COL1_WIDTH("gui.prefix.col1.width", Integer.class, 100),
     PREFIX_COL2_WIDTH("gui.prefix.col2.width", Integer.class, 500),
 
+    CONTEXT_SIZE("gui.context.size", Dimension.class, new Dimension(600, 125)), 
+    CONTEXT_FONT("gui.context.font", Font.class, new Font("Courier", Font.BOLD, 18)),
+    CONTEXT_FONT_CLR("gui.context.prefix.color", Color.class, Color.DARK_GRAY),
+    
     ERROR_FONT("gui.error.font", Font.class, new Font("Courier", Font.BOLD, 15)),
     ERROR_FONT_CLR("gui.error.color", Color.class, Color.RED.darker().darker()),
     
@@ -305,6 +320,7 @@ public class Splink extends JFrame
       mRepository.initialize();
       mConnection = mRepository.getConnection();
       initializeNameSpace();
+      initalizeContext();
       
       // set frame title
       
@@ -329,6 +345,41 @@ public class Splink extends JFrame
       debugMessage("%s: %s", key, mProperties.get(key));
   }  
   
+  private void initalizeContext() throws RepositoryException
+  {
+    setMessage("initializing context...");
+    
+    // create a table model
+    
+    DefaultTableModel contextTable = new DefaultTableModel()
+    {
+      public boolean isCellEditable(int row, int col)
+      {
+        return false;
+      }
+    };
+    contextTable.addColumn("context");
+
+    // get the context values
+    
+    RepositoryResult<Resource> context = mConnection.getContextIDs();
+    while (context.hasNext())
+    {
+      String contextUri = context.next().toString();
+      
+      if (!mShowLongUriCbmi.getState())
+        contextUri = shortUri(contextUri);
+      
+      contextTable.addRow(new String[]{contextUri});
+    }
+    
+    mContextTable = contextTable;
+    if (null != mPrefix)
+      mContext.setModel(mContextTable);
+    
+    setMessage("initialized context.");
+  }
+
   private void initializeNameSpace()
   {
     try
@@ -406,7 +457,7 @@ public class Splink extends JFrame
     return shortUri;
   }
   
-  // add prefix area
+  // add prefix table renderer
 
   TableCellRenderer mPrefixTableRenderer = new DefaultTableCellRenderer()
   {
@@ -437,6 +488,38 @@ public class Splink extends JFrame
 
       c.setBackground(mPrefixRowColors[row % mPrefixRowColors.length]);
 
+      return c;
+    }
+  };
+  
+  // add context table render 
+
+  TableCellRenderer mContextTableRenderer = new DefaultTableCellRenderer()
+  {
+    Color[] mContextRowColors = {
+      Color.WHITE,
+      new Color(220, 230, 255),
+      Color.WHITE,
+      new Color(235, 235, 235),
+    };
+    
+    public Component getTableCellRendererComponent(JTable table,
+      Object value, boolean isSelected, boolean hasFocus, int row, int column)
+    {
+      Component c =
+        super.getTableCellRendererComponent(table, value, isSelected,
+          hasFocus, row, column);
+
+      if (c instanceof JTextArea)
+        ((JTextArea)c).setEditable(false);
+      
+      setHorizontalAlignment(column == 0
+        ? SwingConstants.CENTER
+        : SwingConstants.LEFT);
+
+      c.setForeground(CONTEXT_FONT_CLR.getColor());
+      c.setBackground(mContextRowColors[row % mContextRowColors.length]);
+      
       return c;
     }
   };
@@ -474,43 +557,216 @@ public class Splink extends JFrame
 
     frame.setLayout(new BorderLayout());
 
-    // configure menu
+    // construct gui elements 
 
-    JMenuBar menuBar = new JMenuBar();
-    setJMenuBar(menuBar);
+    constructMenus();
+    constructEditorArea();
+    constructPrefixArea();
+    constructContextArea();
+    constructErrorTextArea();
+    constructResultTable();
 
-    // file menu
+    // create status bar
+
+    mStatusBar = new JLabel(" ");
+
+    // create the table mouse listener
+
+    MouseListener ml = new MouseAdapter()
+    {
+      public void mouseClicked(MouseEvent e)
+      {
+        handleMouseClick(e);
+      }            
+    };
+
+    mResult.addMouseListener(ml);
+    mPrefix.addMouseListener(ml);
+    mContext.addMouseListener(ml);
+
+    // composit the gui frame
     
-    JMenu fileMenu = new JMenu("File");
-    menuBar.add(fileMenu);
-    fileMenu.add(mSave);
+    compositeFrame(frame);
+
+    // adjust tool-tip timeout
+
+    ToolTipManager.sharedInstance().setDismissDelay(Integer.MAX_VALUE);
+
+    // attach shutdown hook
+
+    Runtime.getRuntime().addShutdownHook(new Thread()
+    {
+      public void run()
+      {
+        shutdownHook();
+      }
+    });
+
+    // update the enabled state of our actions
+
+    updateEnabled();
+
+    // make frame visible
+
+    pack();
+    setVisible(true);
+
+    // request focus for current editor
+
+    getCurrentEditor().requestFocus();
+  }
+
+  private int getEditorCount()
+  {
+    return mEditorTab.getTabCount();
+  }
+
+  private JEditorPane getCurrentEditor()
+  {
+    return getEditor(mEditorTab.getSelectedIndex());
+  }
+  
+  private int getEditorIndex()
+  {
+    return mEditorTab.getSelectedIndex();
+  }
+
+  private JEditorPane getEditor(int index)
+  {
+    JScrollPane scroll = (JScrollPane)mEditorTab.getComponent(index);
+    return (JEditorPane)scroll.getViewport().getView();
+  }
+
+  private void setEditor(int index)
+  {
+    mEditorTab.setSelectedIndex(index);
+  }
+  
+  private void constructResultTable()
+  {
+    // create result table
+
+    mResult = new JTable()
+    {
+      public TableCellRenderer getCellRenderer(int row, int column)
+      {
+        return mResultTableRenderer;
+      }
+    };
+
+    mResult.setFont(RESULT_FONT.getFont());
+    mResult.setForeground(RESULT_FONT_CLR.getColor());
+    mResult.setSelectionForeground(RESULT_FONT_CLR.getColor());
     
-    // store menu
+    // look for popup menu mouse events
+    
+    mResult.addMouseListener(new PopupListener(mResult));
+  }
 
-    JMenu storeMenu = new JMenu("Store");
-    menuBar.add(storeMenu);
-    storeMenu.add(mReloadNameSpace);
-    mRepositoryListMenu = new JMenu("Repositories");
-    storeMenu.add(mRepositoryListMenu);
+  private void constructErrorTextArea()
+  {
+    // create error text area
 
-    // query menu
+    mErrorText = new JTextArea();
+    mErrorText.setFont(ERROR_FONT.getFont());
+    mErrorText.setForeground(ERROR_FONT_CLR.getColor());
+    mErrorText.setEditable(false);
+  }
 
-    JMenu queryMenu = new JMenu("Query");
-    menuBar.add(queryMenu);
-    queryMenu.add(mQueryCopy);
-    queryMenu.add(mSubmiteQuery);
-    queryMenu.add(mPreviousQuery);
-    queryMenu.add(mNewQueryTab);
-    queryMenu.add(mQueryLeft);
-    queryMenu.add(mQueryRight);
-    queryMenu.add(mQueryRemoveTab);
+  private void constructPrefixArea()
+  {
+    // create prefix table
 
-    // options menu
+    mPrefix = new JTable()
+    {
+      public TableCellRenderer getCellRenderer(int row, int column)
+      {
+        return mPrefixTableRenderer;
+      }
+    };
+    mPrefix.setFont(PREFIX_FONT.getFont());
+    mPrefix.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
 
-    JMenu optionMenu = new JMenu("Options");
-    menuBar.add(optionMenu);
-    optionMenu.add(mShowLongUriCbmi = new JCheckBoxMenuItem(mShowLongUri));
+    // look for popup menu mouse events
+    
+    mPrefix.addMouseListener(new PopupListener(mPrefix));
+  }
 
+  class PopupListener extends MouseAdapter
+  {
+    private final JTable mTable;
+
+    public PopupListener(JTable table)
+    {
+      mTable = table;
+    }
+
+    public void mousePressed(MouseEvent e)
+    {
+      showPopup(e);
+    }
+
+    public void mouseReleased(MouseEvent e)
+    {
+      showPopup(e);
+    }
+
+    private void showPopup(MouseEvent e)
+    {
+      if (e.isPopupTrigger())
+      {
+        mPopupTableRow = mTable.rowAtPoint(e.getPoint());
+        mPopupTableColumn = mTable.columnAtPoint(e.getPoint());
+        mPopupTable = mTable;
+        mTablePopupMenu.show(e.getComponent(), e.getX(), e.getY());
+      }
+    }
+  }
+  
+  private void constructContextArea()
+  {
+    // create context table
+
+    mContext = new JTable()
+    {
+      public TableCellRenderer getCellRenderer(int row, int column)
+      {
+        return mContextTableRenderer;
+      }
+    };
+    mContext.setFont(CONTEXT_FONT.getFont());
+    mContext.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
+    
+    // look for popup menu mouse events
+    
+    mContext.addMouseListener(new PopupListener(mContext));
+  }
+
+  private void compositeFrame(Container frame)
+  {
+    // compose all the elements into the display
+
+    mEditorTab.setPreferredSize(EDITOR_SIZE.getDimension());
+
+    mPrefixScroll = new JScrollPane(mPrefix);
+    mPrefixScroll.setPreferredSize(PREFIX_SIZE.getDimension());
+
+    mContextScroll = new JScrollPane(mContext);
+    mContextScroll.setPreferredSize(CONTEXT_SIZE.getDimension());
+
+    mResultArea = new JScrollPane(mResult);
+    mResultArea.setPreferredSize(RESULT_SIZE.getDimension());
+    JSplitPane split =
+      new JSplitPane(JSplitPane.VERTICAL_SPLIT, new JSplitPane(
+        JSplitPane.HORIZONTAL_SPLIT, mEditorTab, new JSplitPane(
+          JSplitPane.VERTICAL_SPLIT, mPrefixScroll, mContextScroll)),
+        mResultArea);
+    frame.add(split, BorderLayout.CENTER);
+    frame.add(mStatusBar, BorderLayout.SOUTH);
+  }
+
+  private void constructEditorArea()
+  {
     // create the editor tabbed pane
 
     mEditorTab = new JTabbedPane();
@@ -537,120 +793,77 @@ public class Splink extends JFrame
     }
 
     // if no editors create a new one
-    
-    if (0 == mEditorTab.getComponentCount())
+
+    if (0 == getEditorCount())
       addNewEditor();
-    
+
     // be sure we select the last editor being edited at
-    
-    mEditorTab.setSelectedIndex(EDITOR_CURRENT_QUERY.getInteger());
-    
-    // create prefix table
 
-    mPrefix = new JTable()
-    {
-      public TableCellRenderer getCellRenderer(int row, int column)
-      {
-        return mPrefixTableRenderer;
-      }
-    };
-    mPrefix.setFont(PREFIX_FONT.getFont());
-    mPrefix.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
-
-    // create error text area
-
-    mErrorText = new JTextArea();
-    mErrorText.setFont(ERROR_FONT.getFont());
-    mErrorText.setForeground(ERROR_FONT_CLR.getColor());
-    mErrorText.setEditable(false);
-
-    // create result table
-
-    mResult = new JTable()
-    {
-      public TableCellRenderer getCellRenderer(int row, int column)
-      {
-        return mResultTableRenderer;
-      }
-    };
-
-    mResult.setFont(RESULT_FONT.getFont());
-    mResult.setForeground(RESULT_FONT_CLR.getColor());
-    mResult.setSelectionForeground(RESULT_FONT_CLR.getColor());
-
-    // create the table mouse listener
-
-    MouseListener ml = new MouseAdapter()
-    {
-      public void mouseClicked(MouseEvent e)
-      {
-        if (e.getClickCount() == 2)
-        {
-          JTable target = (JTable)e.getSource();
-          int row = target.getSelectedRow();
-          int column = target.getSelectedColumn();
-          if (target == mResult)
-            inspectResource(target.getModel().getValueAt(row, column)
-              .toString());
-          if (target == mPrefix)
-            inspectPrefix(target.getModel().getValueAt(row, 0).toString() +
-              ":");
-        }
-      }
-    };
-
-    mResult.addMouseListener(ml);
-    mPrefix.addMouseListener(ml);
-
-    // add output
-
-    mOutput = new JLabel(" ");
-
-    // compose all the elements into the display
-
-    mEditorTab.setPreferredSize(EDITOR_SIZE.getDimension());
-
-    mPrefixScroll = new JScrollPane(mPrefix);
-    mPrefixScroll.setPreferredSize(PREFIX_SIZE.getDimension());
-
-    mResultArea = new JScrollPane(mResult);
-    mResultArea.setPreferredSize(RESULT_SIZE.getDimension());
-    JSplitPane split =
-      new JSplitPane(JSplitPane.VERTICAL_SPLIT, new JSplitPane(
-        JSplitPane.HORIZONTAL_SPLIT, mEditorTab, mPrefixScroll), mResultArea);
-    frame.add(split, BorderLayout.CENTER);
-    frame.add(mOutput, BorderLayout.SOUTH);
-
-    // adjust tool-tip timeout
-
-    ToolTipManager.sharedInstance().setDismissDelay(Integer.MAX_VALUE);
-
-    // save preferred window sizes when application closes
-
-    Runtime.getRuntime().addShutdownHook(new Thread()
-    {
-      public void run()
-      {
-        shutdownHook();
-      }
-    });
-
-    // update the enabled state of our actions
-    
-    updateEnabled();
-    
-    // make frame visible
-
-    pack();
-    setVisible(true);
-    
-    // request focus for current editor
-    
-    JScrollPane scroll = (JScrollPane)mEditorTab.getSelectedComponent();
-    JEditorPane editor = (JEditorPane)scroll.getViewport().getView();
-    editor.requestFocus();
+    setEditor(EDITOR_CURRENT_QUERY.getInteger());
   }
 
+  private void constructMenus()
+  {
+    JMenuBar menuBar = new JMenuBar();
+    setJMenuBar(menuBar);
+
+    // file menu
+
+    JMenu fileMenu = new JMenu("File");
+    menuBar.add(fileMenu);
+    fileMenu.add(mSave);
+
+    // store menu
+
+    JMenu storeMenu = new JMenu("Store");
+    menuBar.add(storeMenu);
+    storeMenu.add(mReloadNameSpace);
+    mRepositoryListMenu = new JMenu("Repositories");
+    storeMenu.add(mRepositoryListMenu);
+
+    // query menu
+
+    JMenu queryMenu = new JMenu("Query");
+    menuBar.add(queryMenu);
+    queryMenu.add(mQueryCopy);
+    queryMenu.add(mSubmiteQuery);
+    queryMenu.add(mPreviousQuery);
+    queryMenu.add(mNewQueryTab);
+    queryMenu.add(mQueryLeft);
+    queryMenu.add(mQueryRight);
+    queryMenu.add(mQueryRemoveTab);
+
+    // options menu
+
+    JMenu optionMenu = new JMenu("Options");
+    menuBar.add(optionMenu);
+    optionMenu.add(mShowLongUriCbmi = new JCheckBoxMenuItem(mShowLongUri));
+
+    // create the table popup menu
+    
+    mTablePopupMenu = new JPopupMenu();
+    mTablePopupMenu.add(new JMenuItem(mCopyTableCell));
+    mTablePopupMenu.add(new JMenuItem(mInsertCellValue));
+  }
+
+  private void handleMouseClick(MouseEvent e)
+  {
+    if (e.getClickCount() == 2)
+    {
+      JTable target = (JTable)e.getSource();
+      int row = target.getSelectedRow();
+      int column = target.getSelectedColumn();
+      if (target == mResult)
+        inspectResource(target.getModel().getValueAt(row, column)
+          .toString());
+      if (target == mPrefix)
+        inspectPrefix(target.getModel().getValueAt(row, 0).toString() +
+          ":");
+      if (target == mContext)
+        inspectContext(target.getModel().getValueAt(row, 0).toString());
+    }
+  }
+  
   private void addEditor(String name, String query)
   {
     JEditorPane editor = new JEditorPane();    
@@ -672,7 +885,7 @@ public class Splink extends JFrame
     mResultArea.setViewportView(c);
   }
   
-  private void inspectResource(String uri)
+  private String canonicalizeUri(String uri)
   {
     if (uri.startsWith("_"))
     {
@@ -683,17 +896,34 @@ public class Splink extends JFrame
         "ispect such nodes email me [%s],\n" +
         "and we'll work something out.",
         uri, DEVELOPER_EMAIL_ADDRESS);
-      return;
+      return null;
     }
 
-    String longUri = uri.startsWith("\"") ? "\"\"" + uri + "\"\"" : "<" + longUri(uri) + ">";
+//    if (uri.startsWith("_:"))
+//    {
+//      debugMessage("blank befor: %s", uri);
+//      debugMessage("blank split: %s", uri.split(":")[1]);
+//      BNode bnode = mConnection.getValueFactory().createBNode(uri.split(":")[1]);
+//      uri = bnode.stringValue();
+//      debugMessage("blank after: %s", uri);
+//    }
+      
+    return uri.startsWith("\"") ? "\"\"" + uri + "\"\"" : "<" + longUri(uri) + ">";
+  }
+  
+  private void inspectResource(String resource)
+  {
+    String uri = canonicalizeUri(resource);
+    if (null == uri)
+      return;
+    
     String query =
       String
         .format(
           "SELECT * "
             + "WHERE { ?subject ?predicate ?object "
             + "FILTER (?subject = %s || ?predicate = %s || ?object = %s) }",
-          longUri, longUri, longUri);
+          uri, uri, uri);
     submitQuery(query, true, true);
   }
   
@@ -705,10 +935,24 @@ public class Splink extends JFrame
       "FILTER (" +
       "  regex(str(?subject  ), str(%s)) " +
 //      "  || regex(str(?predicate), str(%s)) " +
-      "  || regex(str(?object   ), str(%s)) " +
+      "  || regex(str(?object   ), \"^\" + str(%s)) " +
       ")}", prefix, prefix, prefix);    
     submitQuery(query, true, true);
   }
+
+  private void inspectContext(String context)
+  {
+    String uri = canonicalizeUri(context);
+    if (null == uri)
+      return;
+    String query = String.format(
+      "SELECT * " +
+      "FROM %s " +
+      "WHERE { ?subject ?predicate ?object }",
+      uri); 
+    submitQuery(query, true, true);
+  }
+  
   
   private void submitQuery()
   {
@@ -717,8 +961,7 @@ public class Splink extends JFrame
   
   private String getCurrentQuery()
   {
-    JScrollPane scroll = (JScrollPane)mEditorTab.getSelectedComponent();
-    JEditorPane editor = (JEditorPane)scroll.getViewport().getView();
+    JEditorPane editor = getCurrentEditor();
     return editor.getText();
   }
 
@@ -883,15 +1126,15 @@ public class Splink extends JFrame
   public void setMessage(Color color, String message, Object... args)
   {
     String fullMessage = String.format(message, args);
-    if (null != mOutput)
+    if (null != mStatusBar)
     {
       String toolTip =
         fullMessage.replaceAll("<", "&lt;").replaceAll(">", "&gt;")
           .replaceAll("\n", "<br>");
-      mOutput.setToolTipText("<html>" + toolTip + "</html>");
-      mOutput.setText(fullMessage);
-      mOutput.setForeground(color);
-      mOutput.repaint();
+      mStatusBar.setToolTipText("<html>" + toolTip + "</html>");
+      mStatusBar.setText(fullMessage);
+      mStatusBar.setForeground(color);
+      mStatusBar.repaint();
     }
     else
       System.out.println(fullMessage);
@@ -977,20 +1220,49 @@ public class Splink extends JFrame
   {
     public void actionPerformed(ActionEvent e)
     {
-      mEditorTab.setSelectedIndex(mEditorTab.getSelectedIndex() - 1);
+      setEditor(getEditorIndex() - 1);
       updateEnabled();
     }
   };
+
+  private SplinkAction mCopyTableCell = new SplinkAction("Copy Cell Contents", null,  "copy cell contents to the system clipboard")
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      StringSelection ss = new StringSelection(mPopupTable.getValueAt(mPopupTableRow, mPopupTableColumn).toString());
+      getToolkit().getSystemClipboard().setContents(ss, null);
+    }
+  };
+
+  private SplinkAction mInsertCellValue = new SplinkAction("Insert Cell Value", null,  "insert table cell value into current query editor")
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      try
+      {
+        getCurrentEditor().getDocument().insertString(
+          getCurrentEditor().getCaretPosition(),
+          mPopupTable.getValueAt(mPopupTableRow, mPopupTableColumn)
+            .toString(), null);
+      }
+      catch (BadLocationException e1)
+      {
+        setError(e1);
+      }
+    }
+  };
+  
   
   private SplinkAction mQueryRight = new SplinkAction("Right Query", getKeyStroke(VK_RIGHT, META_MASK + ALT_MASK),  "select next query to the right")
   {
     public void actionPerformed(ActionEvent e)
     {
-      mEditorTab.setSelectedIndex(mEditorTab.getSelectedIndex() + 1);
+      setEditor(getEditorIndex() + 1);
       updateEnabled();
     }
   };
 
+    
   private SplinkAction mQueryRemoveTab = new SplinkAction("Remove Current Query", null,  "remove currently visible query editor tab")
   {
     public void actionPerformed(ActionEvent e)
@@ -1039,6 +1311,7 @@ public class Splink extends JFrame
     
     EDITOR_SIZE.set(mEditorTab.getSize());
     PREFIX_SIZE.set(mPrefixScroll.getSize());
+    CONTEXT_SIZE.set(mContextScroll.getSize());
     RESULT_SIZE.set(mResultArea.getSize());
     PREFIX_COL1_WIDTH.set(mPrefix.getColumnModel().getColumn(0)
       .getWidth());
@@ -1070,10 +1343,9 @@ public class Splink extends JFrame
 
     // store the query editors
 
-    for (int i = 0; i < mEditorTab.getComponentCount(); ++i)
+    for (int i = 0; i < getEditorCount(); ++i)
     {
-      JScrollPane scroll = (JScrollPane)mEditorTab.getComponent(i);
-      JEditorPane editor = (JEditorPane)scroll.getViewport().getView();
+      JEditorPane editor = getEditor(i);
       mProperties.setProperty(QUERY_NAME_KEY_BASE + i, mEditorTab.getTitleAt(i));
       mProperties.setProperty(QUERY_VALUE_KEY_BASE + i, editor.getText());
     }
