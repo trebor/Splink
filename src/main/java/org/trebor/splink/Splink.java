@@ -576,7 +576,7 @@ public class Splink extends JFrame
   {
     Color[] mResultRowColors = {
       Color.WHITE,
-      new Color(235, 235, 255),
+      new Color(255, 215, 255),
       Color.WHITE,
       new Color(235, 235, 235),
     };
