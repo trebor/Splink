@@ -68,6 +68,7 @@ import javax.swing.ToolTipManager;
 import javax.swing.border.LineBorder;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
+import javax.swing.event.UndoableEditEvent;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellRenderer;
@@ -75,6 +76,7 @@ import javax.swing.table.TableColumn;
 import javax.swing.table.TableModel;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.PlainDocument;
+import javax.swing.undo.UndoManager;
 
 import org.openrdf.model.Namespace;
 import org.openrdf.model.Resource;
@@ -102,6 +104,7 @@ public class Splink extends JFrame
   private static final String QUERY_NAME_KEY_BASE = "query.name.";
   private static final String QUERY_VALUE_KEY_BASE = "query.value.";
 
+  private UndoManager mCurrentUndoManagaer;
   private Properties mProperties;
   private JScrollPane mPrefixScroll;
   private JScrollPane mContextScroll;
@@ -127,6 +130,7 @@ public class Splink extends JFrame
   private JTable mPopupTable;
   private int mPopupTableRow;
   private int mPopupTableColumn;
+  private Map<JEditorPane, UndoManager> mEditorUndoManagerMap;
   
   enum Property
   {
@@ -614,8 +618,7 @@ public class Splink extends JFrame
 
       return header;
     }
-  };
-  
+  };  
   
   private void constructUi(Container frame)
   {
@@ -689,7 +692,9 @@ public class Splink extends JFrame
 
   private JEditorPane getCurrentEditor()
   {
-    return getEditor(mEditorTab.getSelectedIndex());
+    return mEditorTab.getTabCount() == 0
+      ? null
+      : getEditor(mEditorTab.getSelectedIndex());
   }
   
   private int getEditorIndex()
@@ -699,6 +704,8 @@ public class Splink extends JFrame
 
   private JEditorPane getEditor(int index)
   {
+    if (index >= mEditorTab.getTabCount())
+      return null;
     JScrollPane scroll = (JScrollPane)mEditorTab.getComponent(index);
     return (JEditorPane)scroll.getViewport().getView();
   }
@@ -737,6 +744,8 @@ public class Splink extends JFrame
     mErrorText.setFont(ERROR_FONT.getFont());
     mErrorText.setForeground(ERROR_FONT_CLR.getColor());
     mErrorText.setEditable(false);
+    mErrorText.getDocument().putProperty(PlainDocument.tabSizeAttribute,
+      EDITOR_TAB_SIZE.getInteger());
   }
 
   private void constructPrefixArea()
@@ -846,6 +855,7 @@ public class Splink extends JFrame
     {
       public void stateChanged(ChangeEvent arg0)
       {
+        mCurrentUndoManagaer = mEditorUndoManagerMap.get(getCurrentEditor());
         updateEnabled();
       }
     });
@@ -885,6 +895,13 @@ public class Splink extends JFrame
     menuBar.add(fileMenu);
     fileMenu.add(mSave);
 
+    // edit menu
+
+    JMenu editMenu = new JMenu("Edit");
+    menuBar.add(editMenu);
+    editMenu.add(mUndoAction);
+    editMenu.add(mRedoAction);
+    
     // store menu
 
     JMenu storeMenu = new JMenu("Store");
@@ -938,12 +955,37 @@ public class Splink extends JFrame
   
   private void addEditor(String name, String query)
   {
+    // create and configure the editor
+    
     JEditorPane editor = new JEditorPane();    
     editor.setFont(EDITOR_FONT.getFont());
     editor.setForeground(EDITOR_FONT_CLR.getColor());
     editor.getDocument().putProperty(PlainDocument.tabSizeAttribute,
       EDITOR_TAB_SIZE.getInteger());
+    
+    // set the editor text
+    
     editor.setText(query);
+    
+    // add the undo manager
+    
+    mCurrentUndoManagaer = new UndoManager()
+    {
+      @Override
+      public void undoableEditHappened(UndoableEditEvent e)
+      {
+        super.undoableEditHappened(e);
+        updateEnabled();
+      }
+    };
+    editor.getDocument().addUndoableEditListener(mCurrentUndoManagaer);
+
+    if (null == mEditorUndoManagerMap)
+      mEditorUndoManagerMap = new HashMap<JEditorPane, UndoManager>();
+    mEditorUndoManagerMap.put(editor, mCurrentUndoManagaer);
+    
+    // handle adding the editor to the ui
+    
     JScrollPane scroll = new JScrollPane(editor);
     mEditorTab.add(scroll);
     mEditorTab.setSelectedComponent(scroll);
@@ -1357,7 +1399,6 @@ public class Splink extends JFrame
     }
   };
   
-  
   private SplinkAction mSave = new SplinkAction("Save", getKeyStroke(VK_S,
     META_MASK),
     "save the state of all of the current query editors and frame sizes")
@@ -1367,15 +1408,42 @@ public class Splink extends JFrame
       shutdownHook();
     }
   };
+
+  private SplinkAction mUndoAction = new SplinkAction("Undo", getKeyStroke(VK_Z,
+    META_MASK),
+    "undo edior action")
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      mCurrentUndoManagaer.undo();
+      updateEnabled();
+    }
+  };
+  
+  private SplinkAction mRedoAction = new SplinkAction("Redo", getKeyStroke(VK_Z,
+    META_MASK + SHIFT_MASK),
+    "redo edior action")
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      mCurrentUndoManagaer.redo();
+      updateEnabled();
+    }
+  };
   
   protected void updateEnabled()
   {
     int selected = mEditorTab.getSelectedIndex();
     int count = mEditorTab.getTabCount();
-    
+
     mQueryRemoveTab.setEnabled(count > 0);
     mQueryLeft.setEnabled(selected > 0);
     mQueryRight.setEnabled(selected < count - 1);
+
+    mUndoAction.setEnabled(null != mCurrentUndoManagaer &&
+      mCurrentUndoManagaer.canUndo());
+    mRedoAction.setEnabled(null != mCurrentUndoManagaer &&
+      mCurrentUndoManagaer.canRedo());
   }
 
   private void addNewEditor()
