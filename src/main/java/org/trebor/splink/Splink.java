@@ -899,6 +899,8 @@ public class Splink extends JFrame
 
     JMenu editMenu = new JMenu("Edit");
     menuBar.add(editMenu);
+    editMenu.add(mCopyQuery);
+    editMenu.addSeparator();
     editMenu.add(mUndoAction);
     editMenu.add(mRedoAction);
     
@@ -914,13 +916,13 @@ public class Splink extends JFrame
 
     JMenu queryMenu = new JMenu("Query");
     menuBar.add(queryMenu);
-    queryMenu.add(mQueryCopy);
     queryMenu.add(mSubmiteQuery);
     queryMenu.add(mPreviousQuery);
+    queryMenu.addSeparator();
     queryMenu.add(mNewQueryTab);
+    queryMenu.add(mQueryRemoveTab);
     queryMenu.add(mQueryLeft);
     queryMenu.add(mQueryRight);
-    queryMenu.add(mQueryRemoveTab);
 
     // options menu
 
@@ -1080,7 +1082,7 @@ public class Splink extends JFrame
     
     mLastQuery = query;
     
-    mPreviousQuery.setEnabled(!mQueryStack.isEmpty());
+    updateEnabled();
   }
   
   private void popQuery()
@@ -1088,7 +1090,7 @@ public class Splink extends JFrame
     if (null != mQueryStack && !mQueryStack.isEmpty())
       submitQuery(mLastQuery = mQueryStack.pop(), false, false);
 
-    mPreviousQuery.setEnabled(!mQueryStack.isEmpty());
+    updateEnabled();
   }
   
   private void submitQuery(final String query, final boolean appendPrefix,
@@ -1280,7 +1282,7 @@ public class Splink extends JFrame
     abstract public void actionPerformed(ActionEvent e);
   }
   
-  private SplinkAction mSubmiteQuery = new SplinkAction("Submit", getKeyStroke(VK_ENTER, CTRL_MASK),  "submit sparql query")
+  private SplinkAction mSubmiteQuery = new SplinkAction("Submit", getKeyStroke(VK_ENTER, CTRL_MASK),  "perform query in current editor")
   {
     public void actionPerformed(ActionEvent e)
     {
@@ -1288,7 +1290,7 @@ public class Splink extends JFrame
     }
   };
   
-  private SplinkAction mPreviousQuery = new SplinkAction("Previous", getKeyStroke(VK_BACK_SPACE, CTRL_MASK),  "perform previous query")
+  private SplinkAction mPreviousQuery = new SplinkAction("Submit Previous", getKeyStroke(VK_BACK_SPACE, CTRL_MASK),  "perform prevousely submited query (back up)")
   {
     {
       setEnabled(false);
@@ -1309,7 +1311,7 @@ public class Splink extends JFrame
     }
   };  
 
-  private SplinkAction mReloadNameSpace = new SplinkAction("Reload Namespace", getKeyStroke(VK_N, META_MASK),  "reload the namespace values")
+  private SplinkAction mReloadNameSpace = new SplinkAction("Reload Namespace", getKeyStroke(VK_N, META_MASK),  "refresh the prefix table values")
   {
     public void actionPerformed(ActionEvent e)
     {
@@ -1317,7 +1319,7 @@ public class Splink extends JFrame
     }
   };  
 
-  private SplinkAction mNewQueryTab = new SplinkAction("New Query", getKeyStroke(VK_T, META_MASK),  "create a new query editor tab")
+  private SplinkAction mNewQueryTab = new SplinkAction("New Query", getKeyStroke(VK_T, META_MASK),  "create a new query editor")
   {
     public void actionPerformed(ActionEvent e)
     {
@@ -1325,7 +1327,7 @@ public class Splink extends JFrame
     }
   };  
   
-  private SplinkAction mQueryLeft = new SplinkAction("Left Query", getKeyStroke(VK_LEFT, META_MASK + ALT_MASK),  "select next query to the left")
+  private SplinkAction mQueryLeft = new SplinkAction("Left Query", getKeyStroke(VK_LEFT, META_MASK + ALT_MASK),  "select query editor to the left")
   {
     public void actionPerformed(ActionEvent e)
     {
@@ -1364,7 +1366,7 @@ public class Splink extends JFrame
   
   private SplinkAction mQueryRight = new SplinkAction("Right Query",
     getKeyStroke(VK_RIGHT, META_MASK + ALT_MASK),
-    "select next query to the right")
+    "select query editor to the right")
   {
     public void actionPerformed(ActionEvent e)
     {
@@ -1376,7 +1378,7 @@ public class Splink extends JFrame
     
   private SplinkAction mQueryRemoveTab =
     new SplinkAction("Remove Current Query", null,
-      "remove currently visible query editor tab")
+      "delete current query editor (not undoable!)")
     {
       public void actionPerformed(ActionEvent e)
       {
@@ -1387,9 +1389,9 @@ public class Splink extends JFrame
       }
     };
 
-  private SplinkAction mQueryCopy = new SplinkAction("Copy Query",
+  private SplinkAction mCopyQuery = new SplinkAction("Copy Query",
     getKeyStroke(VK_C, META_MASK + SHIFT_MASK),
-    "copy current query to system clipboard")
+    "copy the query from the current editor, with the prefix statements prepended, to system clipboard")
   {
     public void actionPerformed(ActionEvent e)
     {
@@ -1409,9 +1411,8 @@ public class Splink extends JFrame
     }
   };
 
-  private SplinkAction mUndoAction = new SplinkAction("Undo", getKeyStroke(VK_Z,
-    META_MASK),
-    "undo edior action")
+  private SplinkAction mUndoAction = new SplinkAction("Undo", getKeyStroke(
+    VK_Z, META_MASK), "undo edit")
   {
     public void actionPerformed(ActionEvent e)
     {
@@ -1422,7 +1423,7 @@ public class Splink extends JFrame
   
   private SplinkAction mRedoAction = new SplinkAction("Redo", getKeyStroke(VK_Z,
     META_MASK + SHIFT_MASK),
-    "redo edior action")
+    "redo edit")
   {
     public void actionPerformed(ActionEvent e)
     {
@@ -1436,6 +1437,8 @@ public class Splink extends JFrame
     int selected = mEditorTab.getSelectedIndex();
     int count = mEditorTab.getTabCount();
 
+    mPreviousQuery.setEnabled(null != mQueryStack && !mQueryStack.isEmpty());
+    
     mQueryRemoveTab.setEnabled(count > 0);
     mQueryLeft.setEnabled(selected > 0);
     mQueryRight.setEnabled(selected < count - 1);
