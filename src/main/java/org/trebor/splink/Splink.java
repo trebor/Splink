@@ -28,8 +28,6 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.datatransfer.StringSelection;
@@ -57,7 +55,6 @@ import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
-import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollPane;
@@ -101,7 +98,7 @@ import static java.lang.String.format;
 public class Splink extends JFrame
 {
   public static final String PROPERTIES_FILE = System.getProperty("user.home") + File.separator + ".splink";
-  protected static final String DEFAULT_QUERY = "SELECT\n\t*\nWHERE\n{\n\t?subject ?predicate ?object\n}";
+  protected static final String DEFAULT_QUERY = "SELECT\n\t*\nWHERE\n{\n\t?s ?p ?o\n}";
   private static final String QUERY_NAME_KEY_BASE = "query.name.";
   private static final String QUERY_VALUE_KEY_BASE = "query.value.";
 
@@ -439,6 +436,7 @@ public class Splink extends JFrame
           return false;
         }         
       };
+
       prefixTable.addColumn("prefix");
       prefixTable.addColumn("value");
       
@@ -470,7 +468,7 @@ public class Splink extends JFrame
         prefixCol.setHeaderRenderer(mTableHeaderRenderer);
         valueCol.setPreferredWidth(PREFIX_COL2_WIDTH.getInteger());
         valueCol.setHeaderRenderer(mTableHeaderRenderer);
-      }
+     }
       
       setMessage("initialized namespace.");
     }
@@ -754,7 +752,7 @@ public class Splink extends JFrame
     };
     mPrefix.setFont(PREFIX_FONT.getFont());
     mPrefix.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
-
+    
     // look for popup menu mouse events
     
     mPrefix.addMouseListener(new PopupListener(mPrefix));
@@ -825,12 +823,17 @@ public class Splink extends JFrame
 
     mResultArea = new JScrollPane(mResult);
     mResultArea.setPreferredSize(RESULT_SIZE.getDimension());
-    JSplitPane split =
-      new JSplitPane(JSplitPane.VERTICAL_SPLIT, new JSplitPane(
-        JSplitPane.HORIZONTAL_SPLIT, mEditorTab, new JSplitPane(
-          JSplitPane.VERTICAL_SPLIT, mContextScroll, mPrefixScroll)),
-        mResultArea);
-    frame.add(split, BorderLayout.CENTER);
+    
+    JSplitPane contextPrefixSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, mContextScroll, mPrefixScroll);
+    contextPrefixSplit.setBorder(null);
+    
+    JSplitPane topSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, mEditorTab, contextPrefixSplit);
+    topSplit.setBorder(null);
+    
+    JSplitPane masterSplit =new JSplitPane(JSplitPane.VERTICAL_SPLIT, topSplit, mResultArea);
+    masterSplit.setBorder(null);
+    
+    frame.add(masterSplit, BorderLayout.CENTER);
     frame.add(mStatusBar, BorderLayout.SOUTH);
   }
 
@@ -1336,6 +1339,8 @@ public class Splink extends JFrame
       public void actionPerformed(ActionEvent e)
       {
         mEditorTab.remove(mEditorTab.getSelectedIndex());
+        if (mEditorTab.getTabCount() == 0)
+          addNewEditor();
         updateEnabled();
       }
     };
