@@ -28,6 +28,8 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.datatransfer.StringSelection;
@@ -55,6 +57,7 @@ import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
+import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollPane;
@@ -98,7 +101,6 @@ import static java.lang.String.format;
 public class Splink extends JFrame
 {
   public static final String PROPERTIES_FILE = System.getProperty("user.home") + File.separator + ".splink";
-  private static final Object DEVELOPER_EMAIL_ADDRESS = "trebor@trebor.org";
   protected static final String DEFAULT_QUERY = "SELECT\n\t*\nWHERE\n{\n\t?subject ?predicate ?object\n}";
   private static final String QUERY_NAME_KEY_BASE = "query.name.";
   private static final String QUERY_VALUE_KEY_BASE = "query.value.";
@@ -407,7 +409,6 @@ public class Splink extends JFrame
           }
 
           mContextScroll.setViewportView(mContext);
-
           setMessage("initialized context.");
         }
         catch (RepositoryException e)
@@ -820,13 +821,14 @@ public class Splink extends JFrame
 
     mContextScroll = new JScrollPane(mContext);
     mContextScroll.setPreferredSize(CONTEXT_SIZE.getDimension());
+    mContextScroll.setAlignmentY(Component.CENTER_ALIGNMENT);
 
     mResultArea = new JScrollPane(mResult);
     mResultArea.setPreferredSize(RESULT_SIZE.getDimension());
     JSplitPane split =
       new JSplitPane(JSplitPane.VERTICAL_SPLIT, new JSplitPane(
         JSplitPane.HORIZONTAL_SPLIT, mEditorTab, new JSplitPane(
-          JSplitPane.VERTICAL_SPLIT, mPrefixScroll, mContextScroll)),
+          JSplitPane.VERTICAL_SPLIT, mContextScroll, mPrefixScroll)),
         mResultArea);
     frame.add(split, BorderLayout.CENTER);
     frame.add(mStatusBar, BorderLayout.SOUTH);
@@ -1315,7 +1317,9 @@ public class Splink extends JFrame
   };
   
   
-  private SplinkAction mQueryRight = new SplinkAction("Right Query", getKeyStroke(VK_RIGHT, META_MASK + ALT_MASK),  "select next query to the right")
+  private SplinkAction mQueryRight = new SplinkAction("Right Query",
+    getKeyStroke(VK_RIGHT, META_MASK + ALT_MASK),
+    "select next query to the right")
   {
     public void actionPerformed(ActionEvent e)
     {
@@ -1325,26 +1329,33 @@ public class Splink extends JFrame
   };
 
     
-  private SplinkAction mQueryRemoveTab = new SplinkAction("Remove Current Query", null,  "remove currently visible query editor tab")
-  {
-    public void actionPerformed(ActionEvent e)
+  private SplinkAction mQueryRemoveTab =
+    new SplinkAction("Remove Current Query", null,
+      "remove currently visible query editor tab")
     {
-      mEditorTab.remove(mEditorTab.getSelectedIndex());
-      updateEnabled();
-    }
-  };
+      public void actionPerformed(ActionEvent e)
+      {
+        mEditorTab.remove(mEditorTab.getSelectedIndex());
+        updateEnabled();
+      }
+    };
 
-  private SplinkAction mQueryCopy = new SplinkAction("Copy Query", getKeyStroke(VK_C, META_MASK + SHIFT_MASK),  "copy current query to system clipboard")
+  private SplinkAction mQueryCopy = new SplinkAction("Copy Query",
+    getKeyStroke(VK_C, META_MASK + SHIFT_MASK),
+    "copy current query to system clipboard")
   {
     public void actionPerformed(ActionEvent e)
     {
-      StringSelection ss = new StringSelection(mQueryPrefixString + "\n" + getCurrentQuery());
+      StringSelection ss =
+        new StringSelection(mQueryPrefixString + "\n" + getCurrentQuery());
       getToolkit().getSystemClipboard().setContents(ss, null);
     }
   };
   
   
-  private SplinkAction mSave = new SplinkAction("Save", getKeyStroke(VK_S, META_MASK),  "save the state of all of the current query editors and frame sizes")
+  private SplinkAction mSave = new SplinkAction("Save", getKeyStroke(VK_S,
+    META_MASK),
+    "save the state of all of the current query editors and frame sizes")
   {
     public void actionPerformed(ActionEvent e)
     {
