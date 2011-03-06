@@ -65,11 +65,13 @@ import javax.swing.JTextArea;
 import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
 import javax.swing.ToolTipManager;
+import javax.swing.border.LineBorder;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellRenderer;
+import javax.swing.table.TableColumn;
 import javax.swing.table.TableModel;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.PlainDocument;
@@ -97,7 +99,7 @@ public class Splink extends JFrame
 {
   public static final String PROPERTIES_FILE = System.getProperty("user.home") + File.separator + ".splink";
   private static final Object DEVELOPER_EMAIL_ADDRESS = "trebor@trebor.org";
-  protected static final String DEFAULT_QUERY = "SELECT\n\t*\nWHERE\n{\n\t?s ?p ?o\n}";
+  protected static final String DEFAULT_QUERY = "SELECT\n\t*\nWHERE\n{\n\t?subject ?predicate ?object\n}";
   private static final String QUERY_NAME_KEY_BASE = "query.name.";
   private static final String QUERY_VALUE_KEY_BASE = "query.value.";
 
@@ -152,6 +154,10 @@ public class Splink extends JFrame
     
     ERROR_FONT("gui.error.font", Font.class, new Font("Courier", Font.BOLD, 15)),
     ERROR_FONT_CLR("gui.error.color", Color.class, Color.RED.darker().darker()),
+    
+    TABLE_HEADER_FONT("gui.table.header.font", Font.class, new Font("Courier", Font.BOLD, 20)),
+    TABLE_HEADER_FOREGROUND_CLR("gui.table.header.foreground", Color.class, new Color(30, 30, 30)),
+    TABLE_HEADER_BACKGROUND_CLR("gui.table.header.background", Color.class, new Color(230, 230, 230)),
     
     RESULT_SIZE("gui.result.size", Dimension.class, new Dimension(900, 400)),
     RESULT_FONT("gui.result.font", Font.class, new Font("Courier", Font.BOLD, 15)),
@@ -247,7 +253,7 @@ public class Splink extends JFrame
   public Splink()
   {
     initializeProperities();
-    constructFrame(getContentPane());
+    constructUi(getContentPane());
     initializeRepositoryList();
     initializeRepository(SESAME_REPOSITORY.getString());
   }
@@ -319,8 +325,8 @@ public class Splink extends JFrame
 
       mRepository.initialize();
       mConnection = mRepository.getConnection();
-      initializeNameSpace();
-      initalizeContext();
+      initializePrefixes();
+      initalizeContext(repositoryName);
       
       // set frame title
       
@@ -345,42 +351,74 @@ public class Splink extends JFrame
       debugMessage("%s: %s", key, mProperties.get(key));
   }  
   
-  private void initalizeContext() throws RepositoryException
+  private void initalizeContext(final String repositoryName)
   {
-    setMessage("initializing context...");
-    
-    // create a table model
-    
-    DefaultTableModel contextTable = new DefaultTableModel()
+    new Thread()
     {
-      public boolean isCellEditable(int row, int col)
+      public void run()
       {
-        return false;
-      }
-    };
-    contextTable.addColumn("context");
+        try
+        {
+          String message =
+            format("initializing %s context...", repositoryName);
+          setMessage(message);
+          JLabel info = new JLabel(message);
+          info.setFont(CONTEXT_FONT.getFont());
+          info.setForeground(CONTEXT_FONT_CLR.getColor());
+          info.setHorizontalAlignment(JLabel.CENTER);
+          info.setHorizontalAlignment(JLabel.CENTER);
+          mContextScroll.setViewportView(info);
 
-    // get the context values
-    
-    RepositoryResult<Resource> context = mConnection.getContextIDs();
-    while (context.hasNext())
-    {
-      String contextUri = context.next().toString();
-      
-      if (!mShowLongUriCbmi.getState())
-        contextUri = shortUri(contextUri);
-      
-      contextTable.addRow(new String[]{contextUri});
-    }
-    
-    mContextTable = contextTable;
-    if (null != mPrefix)
-      mContext.setModel(mContextTable);
-    
-    setMessage("initialized context.");
+          // create a table model
+
+          DefaultTableModel contextTable = new DefaultTableModel()
+          {
+            public boolean isCellEditable(int row, int col)
+            {
+              return false;
+            }
+          };
+          contextTable.addColumn("context");
+
+          // get the context values
+
+          RepositoryResult<Resource> context;
+          context = mConnection.getContextIDs();
+
+          while (context.hasNext())
+          {
+            String contextUri = context.next().toString();
+
+            if (!mShowLongUriCbmi.getState())
+              contextUri = shortUri(contextUri);
+
+            contextTable.addRow(new String[]
+            {
+              contextUri
+            });
+          }
+
+          mContextTable = contextTable;
+          if (null != mContext)
+          {
+            mContext.setModel(mContextTable);
+            mContext.getColumnModel().getColumn(0)
+              .setHeaderRenderer(mTableHeaderRenderer);
+          }
+
+          mContextScroll.setViewportView(mContext);
+
+          setMessage("initialized context.");
+        }
+        catch (RepositoryException e)
+        {
+          e.printStackTrace();
+        }
+      }
+    }.start();
   }
 
-  private void initializeNameSpace()
+  private void initializePrefixes()
   {
     try
     {
@@ -413,7 +451,7 @@ public class Splink extends JFrame
         prefixTable.addRow(new String[]{nameSpace.getPrefix(), nameSpace.getName()});
         queryPrefixBuffer.append(String.format("PREFIX %s:<%s>\n", nameSpace.getPrefix(), nameSpace.getName()));
       }
-
+      
       // init master query prefix string
       
       mQueryPrefixString = queryPrefixBuffer.toString();
@@ -424,8 +462,13 @@ public class Splink extends JFrame
       if (null != mPrefix)
       {
         mPrefix.setModel(mPrefixTable);
-        mPrefix.getColumnModel().getColumn(0).setPreferredWidth(PREFIX_COL1_WIDTH.getInteger());
-        mPrefix.getColumnModel().getColumn(1).setPreferredWidth(PREFIX_COL2_WIDTH.getInteger());
+        TableColumn prefixCol = mPrefix.getColumnModel().getColumn(0);
+        TableColumn valueCol = mPrefix.getColumnModel().getColumn(1);
+        
+        prefixCol.setPreferredWidth(PREFIX_COL1_WIDTH.getInteger());
+        prefixCol.setHeaderRenderer(mTableHeaderRenderer);
+        valueCol.setPreferredWidth(PREFIX_COL2_WIDTH.getInteger());
+        valueCol.setHeaderRenderer(mTableHeaderRenderer);
       }
       
       setMessage("initialized namespace.");
@@ -551,7 +594,31 @@ public class Splink extends JFrame
     }
   };
 
-  private void constructFrame(Container frame)
+  TableCellRenderer mTableHeaderRenderer = new DefaultTableCellRenderer()
+  {
+    {
+      setHorizontalAlignment(CENTER);
+    }
+    
+    @Override
+    public Component getTableCellRendererComponent(JTable table,
+      Object value, boolean isSelected, boolean hasFocus, int row, int column)
+    {
+      JLabel header = (JLabel)super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+      
+      header.setFont(TABLE_HEADER_FONT.getFont());
+      header.setForeground(TABLE_HEADER_FOREGROUND_CLR.getColor());
+      Color background = TABLE_HEADER_BACKGROUND_CLR.getColor();
+      header.setBackground(background);
+      Color c = new Color(background.getRed() - 15, background.getGreen() - 15, background.getBlue() - 15);
+      header.setBorder(new LineBorder(c, 1, true));
+
+      return header;
+    }
+  };
+  
+  
+  private void constructUi(Container frame)
   {
     // configure frame
 
@@ -586,7 +653,7 @@ public class Splink extends JFrame
 
     // composit the gui frame
     
-    compositeFrame(frame);
+    constructFrame(frame);
 
     // adjust tool-tip timeout
 
@@ -742,7 +809,7 @@ public class Splink extends JFrame
     mContext.addMouseListener(new PopupListener(mContext));
   }
 
-  private void compositeFrame(Container frame)
+  private void constructFrame(Container frame)
   {
     // compose all the elements into the display
 
@@ -893,20 +960,11 @@ public class Splink extends JFrame
         "sorry you can't inspect blank nodes like:" +
         "\n\n   %s\n\nif you now how " +
         "to make a query which CAN\n" +
-        "ispect such nodes email me [%s],\n" +
-        "and we'll work something out.",
-        uri, DEVELOPER_EMAIL_ADDRESS);
+        "ispect such nodes context the splink\n" +
+        "developers at github.com.",
+        uri);
       return null;
     }
-
-//    if (uri.startsWith("_:"))
-//    {
-//      debugMessage("blank befor: %s", uri);
-//      debugMessage("blank split: %s", uri.split(":")[1]);
-//      BNode bnode = mConnection.getValueFactory().createBNode(uri.split(":")[1]);
-//      uri = bnode.stringValue();
-//      debugMessage("blank after: %s", uri);
-//    }
       
     return uri.startsWith("\"") ? "\"\"" + uri + "\"\"" : "<" + longUri(uri) + ">";
   }
@@ -1057,6 +1115,9 @@ public class Splink extends JFrame
       // update the display
 
       mResult.setModel(tm);
+      for (int i = 0; i < tm.getColumnCount(); ++i)
+        mResult.getColumnModel().getColumn(i).setHeaderRenderer(mTableHeaderRenderer);
+
       setResultComponent(mResult);
       
       // return row count
@@ -1090,7 +1151,8 @@ public class Splink extends JFrame
   public void debugMessage(String message, Object... args)
   {
     System.out.println(format(message, args));
-    setMessage(Color.BLUE, message, args);
+    if (null != mStatusBar)
+      setMessage(Color.BLUE, message, args);
   }
   
   public void setError(Exception e, String message, Object... args)
@@ -1204,7 +1266,7 @@ public class Splink extends JFrame
   {
     public void actionPerformed(ActionEvent e)
     {
-      initializeNameSpace();
+      initializePrefixes();
     }
   };  
 
