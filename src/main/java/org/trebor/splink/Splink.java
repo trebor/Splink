@@ -80,11 +80,22 @@ import javax.swing.undo.UndoManager;
 
 import org.openrdf.model.Namespace;
 import org.openrdf.model.Resource;
+import org.openrdf.model.Statement;
 import org.openrdf.query.Binding;
+import org.openrdf.query.BooleanQuery;
+import org.openrdf.query.GraphQuery;
+import org.openrdf.query.GraphQueryResult;
 import org.openrdf.query.QueryEvaluationException;
 import org.openrdf.query.QueryLanguage;
 import org.openrdf.query.TupleQuery;
 import org.openrdf.query.TupleQueryResult;
+import org.openrdf.query.algebra.Projection;
+import org.openrdf.query.algebra.Reduced;
+import org.openrdf.query.algebra.Slice;
+import org.openrdf.query.algebra.TupleExpr;
+import org.openrdf.query.parser.ParsedQuery;
+import org.openrdf.query.parser.QueryParser;
+import org.openrdf.query.parser.sparql.SPARQLParserFactory;
 import org.openrdf.repository.Repository;
 import org.openrdf.repository.RepositoryConnection;
 import org.openrdf.repository.RepositoryException;
@@ -131,6 +142,7 @@ public class Splink extends JFrame
   private int mPopupTableRow;
   private int mPopupTableColumn;
   private Map<JEditorPane, UndoManager> mEditorUndoManagerMap;
+  private QueryParser mSparqlParser;
   
   enum Property
   {
@@ -273,7 +285,6 @@ public class Splink extends JFrame
       public int process(TupleQueryResult result)
         throws QueryEvaluationException
       {
-
         mRepositoryList = new ArrayList<String>();
         String columnName = result.getBindingNames().get(0);
         while (result.hasNext())
@@ -315,6 +326,16 @@ public class Splink extends JFrame
 
         return mRepositoryList.size();
       }
+      
+      public int process(GraphQueryResult result)
+      {
+        throw new UnsupportedOperationException();
+      }
+
+      public boolean process(boolean result)
+      {
+        throw new UnsupportedOperationException();
+      }
     });
   }
   
@@ -333,9 +354,9 @@ public class Splink extends JFrame
       
       // set frame title
       
-      setTitle(String.format("http://%s:%d/openrdf-sesame/%s",
+      setTitle(String.format("http://%s:%d/openrdf-sesame/%s (%d)",
         SESAME_HOST.getString(), SESAME_PORT.getInteger(),
-        repositoryName));
+        repositoryName, mConnection.size()));
     }
     catch (RepositoryException e)
     {
@@ -347,6 +368,10 @@ public class Splink extends JFrame
   {
     mProperties = new Properties(PROPERTIES_FILE);
     Property.initialize(mProperties);
+
+    // establish the sparlq parser
+    
+    mSparqlParser = (new SPARQLParserFactory()).getParser();
 
     // initialize the queries which are being edited
     
@@ -1126,6 +1151,10 @@ public class Splink extends JFrame
   public interface QueryResultsProcessor
   {
     int process(TupleQueryResult result) throws QueryEvaluationException;
+
+    int process(GraphQueryResult result) throws QueryEvaluationException;
+    
+    boolean process(boolean result);
   }
   
   private QueryResultsProcessor mDefaultResultsProcessor = new QueryResultsProcessor()
@@ -1173,6 +1202,69 @@ public class Splink extends JFrame
       
       return tm.getRowCount();
     }
+    
+    public int process(GraphQueryResult result) throws QueryEvaluationException
+    {
+      // create the table model
+      
+      DefaultTableModel tm = new DefaultTableModel()
+      {
+        public boolean isCellEditable(int row, int column)
+        {
+          return false;
+        }
+      };
+      
+      // add columns
+      
+      for (String name: new String[] {"subject", "predicate", "object"})
+        tm.addColumn(name);
+      
+      // populate the table
+
+      while (result.hasNext())
+      {
+        Vector<String> row = new Vector<String>();
+        Statement rowData = result.next();
+        if (mShowLongUriCbmi.getState()) 
+        {
+          row.add(rowData.getSubject().toString());
+          row.add(rowData.getPredicate().toString());
+          row.add(rowData.getObject().toString());
+        }
+        else
+        {
+          row.add(shortUri(rowData.getSubject().toString()));
+          row.add(shortUri(rowData.getPredicate().toString()));
+          row.add(shortUri(rowData.getObject().toString()));
+        }
+
+        tm.addRow(row);
+      }
+      
+      // update the display
+
+      mResult.setModel(tm);
+      for (int i = 0; i < tm.getColumnCount(); ++i)
+        mResult.getColumnModel().getColumn(i).setHeaderRenderer(mTableHeaderRenderer);
+
+      setResultComponent(mResult);
+      
+      // return row count
+      
+      return tm.getRowCount();
+    }
+
+    public boolean process(boolean result)
+    {
+      JLabel resultComponent = new JLabel(format("%b", result).toUpperCase());
+      resultComponent.setFont(RESULT_FONT.getFont().deriveFont(150f));
+      resultComponent.setForeground(RESULT_FONT_CLR.getColor());
+      resultComponent.setVerticalAlignment(JLabel.CENTER);
+      resultComponent.setHorizontalAlignment(JLabel.CENTER);
+      setResultComponent(resultComponent);
+      return result;
+    }
   };
   
   public void performQuery(String queryString, boolean includeInffered,
@@ -1180,15 +1272,56 @@ public class Splink extends JFrame
   {
     try
     {
+      ParsedQuery parsedQuery = mSparqlParser.parseQuery(queryString, null);
+
+      Class<? extends TupleExpr> rootExpressionClass =
+        parsedQuery.getTupleExpr().getClass();
+
+      debugMessage("class: %s", rootExpressionClass);
+
+      // register start time of expression
+
       long startTime = System.currentTimeMillis();
-      TupleQuery query =
-        mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
-      query.setIncludeInferred(includeInffered);
-      TupleQueryResult result = query.evaluate();
-      int rows = resultProcessor.process(result);
-      int columns = result.getBindingNames().size();
-      setMessage("seconds: %2.2f, cols: %d, rows: %d",
-        (System.currentTimeMillis() - startTime) / 1000.f, columns, rows);
+
+      // if this is a slice create, an ask query
+
+      if (rootExpressionClass == Slice.class)
+      {
+        BooleanQuery query =
+          mConnection.prepareBooleanQuery(QueryLanguage.SPARQL, queryString);
+        query.setIncludeInferred(includeInffered);
+        boolean result = query.evaluate();
+        resultProcessor.process(result);
+        setMessage("seconds: %2.2f, result: %b",
+          (System.currentTimeMillis() - startTime) / 1000.f, result);
+      }
+
+      // if this is a projection, create an tuple query
+
+      else if (rootExpressionClass == Projection.class)
+      {
+        TupleQuery query =
+          mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
+        query.setIncludeInferred(includeInffered);
+        TupleQueryResult result = query.evaluate();
+        int rows = resultProcessor.process(result);
+        int columns = result.getBindingNames().size();
+        setMessage("seconds: %2.2f, cols: %d, rows: %d",
+          (System.currentTimeMillis() - startTime) / 1000.f, columns, rows);
+      }
+
+      // if this is a reduced, create an graph query
+
+      else if (rootExpressionClass == Reduced.class)
+      {
+        GraphQuery query =
+          mConnection.prepareGraphQuery(QueryLanguage.SPARQL, queryString);
+        query.setIncludeInferred(includeInffered);
+        GraphQueryResult result = query.evaluate();
+        int rows = resultProcessor.process(result);
+        setMessage("seconds: %2.2f, cols: %d, rows: %d",
+          (System.currentTimeMillis() - startTime) / 1000.f, 3, rows);
+      }
     }
     catch (Exception e)
     {
