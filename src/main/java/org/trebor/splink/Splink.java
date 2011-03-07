@@ -1048,15 +1048,8 @@ public class Splink extends JFrame
     String uri = canonicalizeUri(resource);
     if (null == uri)
       return;
-    
-    String query =
-      String
-        .format(
-          "SELECT * "
-            + "WHERE { ?subject ?predicate ?object "
-            + "FILTER (?subject = %s || ?predicate = %s || ?object = %s) }",
-          uri, uri, uri);
-    submitQuery(query, true, true);
+
+    submitQuery("DESCRIBE " + uri, true, true);
   }
   
   private void inspectPrefix(String prefix)
