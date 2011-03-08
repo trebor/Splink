@@ -45,6 +45,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Stack;
 import java.util.Vector;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.swing.AbstractAction;
 import javax.swing.ButtonGroup;
@@ -89,6 +91,7 @@ import org.openrdf.query.QueryEvaluationException;
 import org.openrdf.query.QueryLanguage;
 import org.openrdf.query.TupleQuery;
 import org.openrdf.query.TupleQueryResult;
+import org.openrdf.query.algebra.Distinct;
 import org.openrdf.query.algebra.Projection;
 import org.openrdf.query.algebra.Reduced;
 import org.openrdf.query.algebra.Slice;
@@ -111,9 +114,16 @@ import static java.lang.String.format;
 public class Splink extends JFrame
 {
   public static final String PROPERTIES_FILE = System.getProperty("user.home") + File.separator + ".splink";
-  protected static final String DEFAULT_QUERY = "SELECT\n\t*\nWHERE\n{\n\t?s ?p ?o\n}";
-  private static final String QUERY_NAME_KEY_BASE = "query.name.";
-  private static final String QUERY_VALUE_KEY_BASE = "query.value.";
+  public static final String DEFAULT_QUERY = "SELECT\n\t*\nWHERE\n{\n\t?s ?p ?o\n}";
+  public static final String QUERY_NAME_KEY_BASE = "query.name.";
+  public static final String QUERY_VALUE_KEY_BASE = "query.value.";
+  public static final String URI_IDENTIFIER_RE = "[a-zA-Z_0-9\\.\\-]*";
+  public static final String PROTOCOL_IDENTIFIER_RE = "\\w*";
+  public static final String SHORT_URI_RE = format("%s(?<!_):%s", URI_IDENTIFIER_RE, URI_IDENTIFIER_RE);
+  public static final String LONG_URI_RE = format("%s://.*", PROTOCOL_IDENTIFIER_RE);
+  public static final String LITERAL_RE = format("\".*\"(@%s|\\^\\^%s|\\^\\^%s|)", URI_IDENTIFIER_RE, SHORT_URI_RE, LONG_URI_RE);
+  public static final String BLANK_NODE_RE = format("_:%s", URI_IDENTIFIER_RE);
+  
 
   private UndoManager mCurrentUndoManagaer;
   private Properties mProperties;
@@ -129,12 +139,14 @@ public class Splink extends JFrame
   private JLabel mStatusBar;
   private List<String> mRepositoryList;
   private JCheckBoxMenuItem mShowLongUriCbmi;
+  private JCheckBoxMenuItem mShowInferencedCbmi;
   private TableModel mPrefixTable;
   private TableModel mContextTable;
   private String mQueryPrefixString;
   private Repository mRepository;
   private RepositoryConnection mConnection;
   private Map<String, String> mNameSpaceMap;
+  private Map<String, Pattern> mPrefixRegex;
   private Stack<String> mQueryStack;
   private String mLastQuery;
   private JPopupMenu mTablePopupMenu;
@@ -143,6 +155,35 @@ public class Splink extends JFrame
   private int mPopupTableColumn;
   private Map<JEditorPane, UndoManager> mEditorUndoManagerMap;
   private QueryParser mSparqlParser;
+  
+  enum ResourceType
+  {    
+    SHORT_URI(SHORT_URI_RE),
+    LONG_URI(LONG_URI_RE),
+    BLANK_NODE(BLANK_NODE_RE),
+    LITERAL(LITERAL_RE);
+    
+    private final Pattern mPattern;
+    
+    ResourceType(String regex)
+    {
+      mPattern = Pattern.compile("^" + regex + "$");
+    }
+    
+    public boolean isMatch(String uri)
+    {
+      return mPattern.matcher(uri).matches();
+    }
+    
+    static ResourceType establishType(String uri)
+    {
+      for (ResourceType type: values())
+        if (type.isMatch(uri))
+          return type;
+      
+      return null;
+    }
+  }
   
   enum Property
   {
@@ -450,55 +491,64 @@ public class Splink extends JFrame
     try
     {
       setMessage("initializing namespace...");
-      
+
       // init name-space map and a buffer to build the query prefix string
-      
+
       mNameSpaceMap = new HashMap<String, String>();
+      mPrefixRegex = new HashMap<String, Pattern>();
       StringBuffer queryPrefixBuffer = new StringBuffer();
-      
+
       // init name-space table
-      
+
       DefaultTableModel prefixTable = new DefaultTableModel()
       {
         public boolean isCellEditable(int row, int col)
         {
           return false;
-        }         
+        }
       };
 
       prefixTable.addColumn("prefix");
       prefixTable.addColumn("value");
-      
+
       // populate table and map
-      
+
       RepositoryResult<Namespace> nameSpaces = mConnection.getNamespaces();
       while (nameSpaces.hasNext())
       {
         Namespace nameSpace = nameSpaces.next();
         mNameSpaceMap.put(nameSpace.getName(), nameSpace.getPrefix() + ":");
-        prefixTable.addRow(new String[]{nameSpace.getPrefix(), nameSpace.getName()});
-        queryPrefixBuffer.append(String.format("PREFIX %s:<%s>\n", nameSpace.getPrefix(), nameSpace.getName()));
+        mPrefixRegex.put(
+          nameSpace.getName(),
+          Pattern.compile(String.format("^%s(%s)$",
+            Pattern.quote(nameSpace.getName()), Splink.URI_IDENTIFIER_RE)));
+        prefixTable.addRow(new String[]
+        {
+          nameSpace.getPrefix(), nameSpace.getName()
+        });
+        queryPrefixBuffer.append(String.format("PREFIX %s:<%s>\n",
+          nameSpace.getPrefix(), nameSpace.getName()));
       }
-      
+
       // init master query prefix string
-      
+
       mQueryPrefixString = queryPrefixBuffer.toString();
-      
+
       // init master prefix table
-      
+
       mPrefixTable = prefixTable;
       if (null != mPrefix)
       {
         mPrefix.setModel(mPrefixTable);
         TableColumn prefixCol = mPrefix.getColumnModel().getColumn(0);
         TableColumn valueCol = mPrefix.getColumnModel().getColumn(1);
-        
+
         prefixCol.setPreferredWidth(PREFIX_COL1_WIDTH.getInteger());
         prefixCol.setHeaderRenderer(mTableHeaderRenderer);
         valueCol.setPreferredWidth(PREFIX_COL2_WIDTH.getInteger());
         valueCol.setHeaderRenderer(mTableHeaderRenderer);
-     }
-      
+      }
+
       setMessage("initialized namespace.");
     }
     catch (Exception e)
@@ -506,12 +556,15 @@ public class Splink extends JFrame
       setError(e);
     }
   }
-  
+
   private String shortUri(String longUri)
   {
     for (String name: mNameSpaceMap.keySet())
-      if (longUri.startsWith(name))
-        return longUri.replace(name, mNameSpaceMap.get(name));
+    {
+      Matcher m = mPrefixRegex.get(name).matcher(longUri);
+      if (m.find())
+        return mNameSpaceMap.get(name) + m.group(1);
+    }
     
     return longUri;
   }
@@ -954,6 +1007,8 @@ public class Splink extends JFrame
     JMenu optionMenu = new JMenu("Options");
     menuBar.add(optionMenu);
     optionMenu.add(mShowLongUriCbmi = new JCheckBoxMenuItem(mShowLongUri));
+    optionMenu.add(mShowInferencedCbmi = new JCheckBoxMenuItem(mShowInferenced));
+    mShowInferencedCbmi.setSelected(true);
 
     // create the table popup menu
     
@@ -1133,8 +1188,9 @@ public class Splink extends JFrame
         mPreviousQuery.setEnabled(false);
 
         debugMessage(fullQuery);
-        performQuery(fullQuery, true, mDefaultResultsProcessor);
-        
+        performQuery(fullQuery, mShowInferencedCbmi.isSelected(),
+          mDefaultResultsProcessor);
+
         mSubmiteQuery.setEnabled(submitEnabled);
         mPreviousQuery.setEnabled(previousEnabled);
       }
@@ -1291,7 +1347,7 @@ public class Splink extends JFrame
 
       // if this is a projection, create an tuple query
 
-      else if (rootExpressionClass == Projection.class)
+      else if (rootExpressionClass == Projection.class || rootExpressionClass == Distinct.class)
       {
         TupleQuery query =
           mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
@@ -1314,6 +1370,10 @@ public class Splink extends JFrame
         int rows = resultProcessor.process(result);
         setMessage("seconds: %2.2f, cols: %d, rows: %d",
           (System.currentTimeMillis() - startTime) / 1000.f, 3, rows);
+      }
+      else
+      {
+        setError("Unknown query type: " + rootExpressionClass);
       }
     }
     catch (Exception e)
@@ -1429,6 +1489,15 @@ public class Splink extends JFrame
   };
   
   private SplinkAction mShowLongUri = new SplinkAction("Long URI", getKeyStroke(VK_L, CTRL_MASK),  "show result URIs in long form")
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      if (null != mLastQuery)
+        submitQuery(mLastQuery, false, false);
+    }
+  };
+  
+  private SplinkAction mShowInferenced = new SplinkAction("Include Inferenced", getKeyStroke(VK_I, CTRL_MASK),  "return results which include inferenced tripples")
   {
     public void actionPerformed(ActionEvent e)
     {
@@ -1626,7 +1695,7 @@ public class Splink extends JFrame
     }
     
     EDITOR_CURRENT_QUERY.set(mEditorTab.getSelectedIndex());
-  }  
+  }
 }
 
 
