@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 import org.junit.Test;
 import org.trebor.splink.Splink.ResourceType;
 
-public class SplinkTests
+public class TestSplink
 {
   @Test
   public void testUri()
