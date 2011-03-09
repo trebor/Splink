@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Stack;
 import java.util.Vector;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -91,20 +92,20 @@ import org.openrdf.query.QueryEvaluationException;
 import org.openrdf.query.QueryLanguage;
 import org.openrdf.query.TupleQuery;
 import org.openrdf.query.TupleQueryResult;
-import org.openrdf.query.algebra.Distinct;
-import org.openrdf.query.algebra.Projection;
-import org.openrdf.query.algebra.Reduced;
 import org.openrdf.query.algebra.Slice;
-import org.openrdf.query.algebra.TupleExpr;
+import org.openrdf.query.algebra.helpers.QueryModelVisitorBase;
+import org.openrdf.query.parser.ParsedBooleanQuery;
+import org.openrdf.query.parser.ParsedGraphQuery;
 import org.openrdf.query.parser.ParsedQuery;
-import org.openrdf.query.parser.QueryParser;
-import org.openrdf.query.parser.sparql.SPARQLParserFactory;
+import org.openrdf.query.parser.ParsedTupleQuery;
+import org.openrdf.query.parser.QueryParserUtil;
 import org.openrdf.repository.Repository;
 import org.openrdf.repository.RepositoryConnection;
 import org.openrdf.repository.RepositoryException;
 import org.openrdf.repository.RepositoryResult;
 import org.openrdf.repository.http.HTTPRepository;
 
+import static org.openrdf.query.QueryLanguage.*;
 import static org.trebor.splink.Splink.Property.*;
 import static javax.swing.KeyStroke.getKeyStroke;
 import static java.awt.event.KeyEvent.*;
@@ -123,8 +124,10 @@ public class Splink extends JFrame
   public static final String LONG_URI_RE = format("%s://.*", PROTOCOL_IDENTIFIER_RE);
   public static final String LITERAL_RE = format("\".*\"(@%s|\\^\\^%s|\\^\\^%s|)", URI_IDENTIFIER_RE, SHORT_URI_RE, LONG_URI_RE);
   public static final String BLANK_NODE_RE = format("_:%s", URI_IDENTIFIER_RE);
+  public static final int NO_QUERY_LIMIT = Integer.MIN_VALUE;
   
 
+  private int mQueryLimit;
   private UndoManager mCurrentUndoManagaer;
   private Properties mProperties;
   private JScrollPane mPrefixScroll;
@@ -154,7 +157,6 @@ public class Splink extends JFrame
   private int mPopupTableRow;
   private int mPopupTableColumn;
   private Map<JEditorPane, UndoManager> mEditorUndoManagerMap;
-  private QueryParser mSparqlParser;
   
   enum ResourceType
   {    
@@ -190,6 +192,8 @@ public class Splink extends JFrame
     SESAME_HOST("sesame.host", String.class, "localhost"),
     SESAME_PORT("sesame.port", Integer.class, 8080),
     SESAME_REPOSITORY("sesame.repository", String.class, "SYSTEM"),
+    
+    QUERY_RESULT_LIIMT("query.result.limit", Integer.class, 100),
 
     EDITOR_SIZE("gui.editor.size", Dimension.class, new Dimension(300, 250)), 
     EDITOR_FONT("gui.editor.font", Font.class, new Font("Courier", Font.BOLD, 18)),
@@ -321,7 +325,7 @@ public class Splink extends JFrame
     String query = mQueryPrefixString +  "SELECT ?o WHERE {?_ sys:repositoryID ?o}";
     
     // extract repository list
-    performQuery(query, false, new QueryResultsProcessor()
+    performQuery(query, false, false, new QueryResultsProcessor()
     {
       public int process(TupleQueryResult result)
         throws QueryEvaluationException
@@ -409,10 +413,6 @@ public class Splink extends JFrame
   {
     mProperties = new Properties(PROPERTIES_FILE);
     Property.initialize(mProperties);
-
-    // establish the sparlq parser
-    
-    mSparqlParser = (new SPARQLParserFactory()).getParser();
 
     // initialize the queries which are being edited
     
@@ -961,7 +961,7 @@ public class Splink extends JFrame
 
     setEditor(EDITOR_CURRENT_QUERY.getInteger());
   }
-
+  
   private void constructMenus()
   {
     JMenuBar menuBar = new JMenuBar();
@@ -981,7 +981,7 @@ public class Splink extends JFrame
     editMenu.addSeparator();
     editMenu.add(mUndoAction);
     editMenu.add(mRedoAction);
-    
+
     // store menu
 
     JMenu storeMenu = new JMenu("Store");
@@ -1002,16 +1002,43 @@ public class Splink extends JFrame
     queryMenu.add(mQueryLeft);
     queryMenu.add(mQueryRight);
 
+    // add the query limit menu
+
+    JMenu limitMenu = new JMenu("Result Size");
+    queryMenu.addSeparator();
+    queryMenu.add(limitMenu);
+    
+    ButtonGroup limitButtonGroup = new ButtonGroup();
+    for (QueryLimitAction limit : mQuerylimitActions)
+    {
+      JRadioButtonMenuItem button = new JRadioButtonMenuItem(limit);
+      limitButtonGroup.add(button);
+      limitMenu.add(button);
+      if (limit.getLimit() == QUERY_RESULT_LIIMT.getInteger())
+        button.doClick();
+    }
+
+    if (limitButtonGroup.getSelection() == null)
+    {
+      JRadioButtonMenuItem button =
+        new JRadioButtonMenuItem(new QueryLimitAction(
+          QUERY_RESULT_LIIMT.getInteger(), getKeyStroke(VK_4, META_MASK)));
+      limitButtonGroup.add(button);
+      limitMenu.add(button);
+      button.doClick();
+    }
+
     // options menu
 
     JMenu optionMenu = new JMenu("Options");
     menuBar.add(optionMenu);
     optionMenu.add(mShowLongUriCbmi = new JCheckBoxMenuItem(mShowLongUri));
-    optionMenu.add(mShowInferencedCbmi = new JCheckBoxMenuItem(mShowInferenced));
+    optionMenu.add(mShowInferencedCbmi =
+      new JCheckBoxMenuItem(mShowInferenced));
     mShowInferencedCbmi.setSelected(true);
 
     // create the table popup menu
-    
+
     mTablePopupMenu = new JPopupMenu();
     mTablePopupMenu.add(new JMenuItem(mCopyTableCell));
     mTablePopupMenu.add(new JMenuItem(mInsertCellValue));
@@ -1176,7 +1203,6 @@ public class Splink extends JFrame
     if (pushQuery)
       pushQuery(fullQuery);
           
-    setMessage("Querying...");
     new Thread()
     {
       public void run()
@@ -1187,8 +1213,7 @@ public class Splink extends JFrame
         mSubmiteQuery.setEnabled(false);
         mPreviousQuery.setEnabled(false);
 
-        debugMessage(fullQuery);
-        performQuery(fullQuery, mShowInferencedCbmi.isSelected(),
+        performQuery(fullQuery, mShowInferencedCbmi.isSelected(), true,
           mDefaultResultsProcessor);
 
         mSubmiteQuery.setEnabled(submitEnabled);
@@ -1317,16 +1342,36 @@ public class Splink extends JFrame
   };
   
   public void performQuery(String queryString, boolean includeInffered,
-    QueryResultsProcessor resultProcessor)
+    boolean limitResults, QueryResultsProcessor resultProcessor)
   {
     try
     {
-      ParsedQuery parsedQuery = mSparqlParser.parseQuery(queryString, null);
+      ParsedQuery parsedQuery =
+        QueryParserUtil.parseQuery(SPARQL, queryString, null);
 
-      Class<? extends TupleExpr> rootExpressionClass =
-        parsedQuery.getTupleExpr().getClass();
+      // if there is a query limit, apply it
 
-      debugMessage("class: %s", rootExpressionClass);
+      int actualLimit = NO_QUERY_LIMIT;
+      if (limitResults && mQueryLimit != NO_QUERY_LIMIT && !(parsedQuery instanceof ParsedGraphQuery))
+      {
+        final AtomicBoolean hasLimit = new AtomicBoolean(false);
+        parsedQuery.getTupleExpr().visit(
+          new QueryModelVisitorBase<Exception>()
+          {
+            public void meet(Slice node) throws Exception
+            {
+              hasLimit.set(true);
+            }
+          });
+
+        if (!hasLimit.get())
+        {
+          queryString += "\nLIMIT " + mQueryLimit;
+          actualLimit = mQueryLimit;
+        }
+      }
+
+      debugMessage(queryString);
 
       // register start time of expression
 
@@ -1334,8 +1379,9 @@ public class Splink extends JFrame
 
       // if this is a slice create, an ask query
 
-      if (rootExpressionClass == Slice.class)
+      if (parsedQuery instanceof ParsedBooleanQuery)
       {
+        setMessage("Querying...");
         BooleanQuery query =
           mConnection.prepareBooleanQuery(QueryLanguage.SPARQL, queryString);
         query.setIncludeInferred(includeInffered);
@@ -1347,33 +1393,37 @@ public class Splink extends JFrame
 
       // if this is a projection, create an tuple query
 
-      else if (rootExpressionClass == Projection.class || rootExpressionClass == Distinct.class)
+      else if (parsedQuery instanceof ParsedTupleQuery)
       {
+        setMessage("Querying...");
         TupleQuery query =
           mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
         query.setIncludeInferred(includeInffered);
         TupleQueryResult result = query.evaluate();
         int rows = resultProcessor.process(result);
         int columns = result.getBindingNames().size();
-        setMessage("seconds: %2.2f, cols: %d, rows: %d",
-          (System.currentTimeMillis() - startTime) / 1000.f, columns, rows);
+        setMessage("seconds: %2.2f, cols: %d, rows: %d%s",
+          (System.currentTimeMillis() - startTime) / 1000.f, columns, rows,
+          rows == actualLimit ? " (limited)" : "");
       }
 
       // if this is a reduced, create an graph query
 
-      else if (rootExpressionClass == Reduced.class)
+      else if (parsedQuery instanceof ParsedGraphQuery)
       {
+        setMessage("Querying...");
         GraphQuery query =
           mConnection.prepareGraphQuery(QueryLanguage.SPARQL, queryString);
         query.setIncludeInferred(includeInffered);
         GraphQueryResult result = query.evaluate();
         int rows = resultProcessor.process(result);
-        setMessage("seconds: %2.2f, cols: %d, rows: %d",
-          (System.currentTimeMillis() - startTime) / 1000.f, 3, rows);
+        setMessage("seconds: %2.2f, cols: %d, rows: %d %s",
+          (System.currentTimeMillis() - startTime) / 1000.f, 3, rows, 
+          rows == actualLimit ? " (limited)" : "");
       }
       else
       {
-        setError("Unknown query type: " + rootExpressionClass);
+        setError("Unknown query type: " + parsedQuery);
       }
     }
     catch (Exception e)
@@ -1467,6 +1517,44 @@ public class Splink extends JFrame
 
     abstract public void actionPerformed(ActionEvent e);
   }
+
+  class QueryLimitAction extends SplinkAction
+  {
+    private final int mLimit;
+    
+    public QueryLimitAction(int limit, KeyStroke key)
+    {
+      super(limit == NO_QUERY_LIMIT
+        ? "Unlimited"
+        : "Limit " + limit, key, limit == NO_QUERY_LIMIT
+        ? "return an unlimited number of rows"
+        : "limit query results to " + limit + " rows");
+      mLimit = limit;
+    }
+
+    public void actionPerformed(ActionEvent arg0)
+    {
+      mQueryLimit = mLimit;
+      if (getLimit() == NO_QUERY_LIMIT)
+        setMessage("query results size unlimited");
+      else
+        setMessage("query results limited to %d rows", getLimit());
+      updateEnabled();
+    }
+    
+    public int getLimit()
+    {
+      return mLimit;
+    }
+  }
+
+  private QueryLimitAction [] mQuerylimitActions =
+    {
+      new QueryLimitAction(NO_QUERY_LIMIT, getKeyStroke(VK_0, META_MASK)),
+      new QueryLimitAction(10, getKeyStroke(VK_1, META_MASK)),
+      new QueryLimitAction(100, getKeyStroke(VK_2, META_MASK)),
+      new QueryLimitAction(1000, getKeyStroke(VK_3, META_MASK)),
+    };
   
   private SplinkAction mSubmiteQuery = new SplinkAction("Submit", getKeyStroke(VK_ENTER, CTRL_MASK),  "perform query in current editor")
   {
@@ -1629,19 +1717,23 @@ public class Splink extends JFrame
   
   protected void updateEnabled()
   {
-    int selected = mEditorTab.getSelectedIndex();
-    int count = mEditorTab.getTabCount();
+    if (null != mEditorTab)
+    {
+      int selected = mEditorTab.getSelectedIndex();
+      int count = mEditorTab.getTabCount();
 
-    mPreviousQuery.setEnabled(null != mQueryStack && !mQueryStack.isEmpty());
-    
-    mQueryRemoveTab.setEnabled(count > 0);
-    mQueryLeft.setEnabled(selected > 0);
-    mQueryRight.setEnabled(selected < count - 1);
+      mPreviousQuery
+        .setEnabled(null != mQueryStack && !mQueryStack.isEmpty());
 
-    mUndoAction.setEnabled(null != mCurrentUndoManagaer &&
-      mCurrentUndoManagaer.canUndo());
-    mRedoAction.setEnabled(null != mCurrentUndoManagaer &&
-      mCurrentUndoManagaer.canRedo());
+      mQueryRemoveTab.setEnabled(count > 0);
+      mQueryLeft.setEnabled(selected > 0);
+      mQueryRight.setEnabled(selected < count - 1);
+
+      mUndoAction.setEnabled(null != mCurrentUndoManagaer &&
+        mCurrentUndoManagaer.canUndo());
+      mRedoAction.setEnabled(null != mCurrentUndoManagaer &&
+        mCurrentUndoManagaer.canRedo());
+    }
   }
 
   private void addNewEditor()
@@ -1661,6 +1753,8 @@ public class Splink extends JFrame
       .getWidth());
     PREFIX_COL2_WIDTH.set(mPrefix.getColumnModel().getColumn(1)
       .getWidth());
+    
+    QUERY_RESULT_LIIMT.set(mQueryLimit);
 
     // expunge old edior state
     
