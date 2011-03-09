@@ -1022,7 +1022,7 @@ public class Splink extends JFrame
     {
       JRadioButtonMenuItem button =
         new JRadioButtonMenuItem(new QueryLimitAction(
-          QUERY_RESULT_LIIMT.getInteger(), getKeyStroke(VK_4, META_MASK)));
+          QUERY_RESULT_LIIMT.getInteger(), getKeyStroke(VK_5, META_MASK)));
       limitButtonGroup.add(button);
       limitMenu.add(button);
       button.doClick();
@@ -1554,6 +1554,7 @@ public class Splink extends JFrame
       new QueryLimitAction(10, getKeyStroke(VK_1, META_MASK)),
       new QueryLimitAction(100, getKeyStroke(VK_2, META_MASK)),
       new QueryLimitAction(1000, getKeyStroke(VK_3, META_MASK)),
+      new QueryLimitAction(10000, getKeyStroke(VK_4, META_MASK)),
     };
   
   private SplinkAction mSubmiteQuery = new SplinkAction("Submit", getKeyStroke(VK_ENTER, CTRL_MASK),  "perform query in current editor")
