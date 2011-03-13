@@ -1,5 +1,6 @@
 package org.trebor.splink;
 
+import static java.lang.System.out;
 import static org.junit.Assert.*;
 import static org.trebor.splink.Splink.ResourceType.*;
 
@@ -8,39 +9,65 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.junit.Ignore;
 import org.junit.Test;
 import org.trebor.splink.Splink.ResourceType;
 
 public class TestSplink
 {
+  @SuppressWarnings("serial")
+  public static final Map<String, ResourceType> RESOURCE_EXAMPLES =
+    new HashMap<String, ResourceType>()
+    {
+      {
+        put("foo:bar#baz", null);
+        put("foo:bar/baz", null);
+
+        put("foo:bar", SHORT_URI);
+        put("foo:bar.baz", SHORT_URI);
+        put("foo_bar:baz_qux", SHORT_URI);
+
+        put("_:node15pf8hastx4", BLANK_NODE);
+        put("_:x", BLANK_NODE);
+
+        put("http://www.google.com/foo#bar", LONG_URI);
+        put("file://foo.txt", LONG_URI);
+        put("file://foo/bar.txt", LONG_URI);
+        put("http://www.google.com/foo", LONG_URI);
+
+        put("\"hello my name is fred\"", LITERAL);
+        put("\"hello my name is fred\"@en", LITERAL);
+        put("\"hello my name is fred\"@en_gb", LITERAL);
+        put("\"hello my name is fred\"^^xsd:integer", LITERAL);
+        put("\"hello my name is fred\"^^http://www.w3.org/2001/XMLSchema#integer", LITERAL);
+        put("\"hello my name is \"fred\"\"^^http://www.w3.org/2001/XMLSchema#integer", LITERAL);
+      }
+    };
+
+  
   @Test
   public void testUri()
   {
-    Map<String, ResourceType> uriExamples = new HashMap<String, ResourceType>();
+    for (String uri: RESOURCE_EXAMPLES.keySet())
+      assertEquals(uri, RESOURCE_EXAMPLES.get(uri), ResourceType.establishType(uri));
+  }
 
-    uriExamples.put("foo:bar#baz", null);
-    uriExamples.put("foo:bar/baz", null);
-    
-    uriExamples.put("foo:bar", SHORT_URI);
-    uriExamples.put("foo:bar.baz", SHORT_URI);
-    uriExamples.put("foo_bar:baz_qux", SHORT_URI);
-    
-    uriExamples.put("_:node15pf8hastx4", BLANK_NODE);
-    uriExamples.put("_:x", BLANK_NODE);
-    
-    uriExamples.put("http://www.google.com/foo#bar", LONG_URI);
-    uriExamples.put("file://foo.txt", LONG_URI);
-    uriExamples.put("file://foo/bar.txt", LONG_URI);
-    uriExamples.put("http://www.google.com/foo", LONG_URI);
-    
-    uriExamples.put("\"hello my name is fred\"", LITERAL);
-    uriExamples.put("\"hello my name is fred\"@en", LITERAL);
-    uriExamples.put("\"hello my name is fred\"@en_gb", LITERAL);
-    uriExamples.put("\"hello my name is fred\"^^xsd:integer", LITERAL);
-    uriExamples.put("\"hello my name is fred\"^^http://www.w3.org/2001/XMLSchema#integer", LITERAL);
-    
-    for (String uri: uriExamples.keySet())
-      assertEquals(uri, uriExamples.get(uri), ResourceType.establishType(uri));
+  @Test
+  public void testParseLiteral()
+  {
+    for (String uri: RESOURCE_EXAMPLES.keySet())
+    {
+      if (RESOURCE_EXAMPLES.get(uri) == LITERAL)
+      {
+        System.out.println(String.format(uri));
+        Matcher m = LITERAL.parse(uri);
+        assertTrue(m.matches());
+        for (int i = 0; i <  m.groupCount(); ++i)
+          out.format("  %d: %s\n", i, m.group(i + 1));
+        
+        out.format("\"\"\"%s\"\"\"%s\n", m.group(1).replaceAll("\"", "\\\\\""), m.group(2) == null ? "" : m.group(2));
+      }
+    }
   }
   
   @Test

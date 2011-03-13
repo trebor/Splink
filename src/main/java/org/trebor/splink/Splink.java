@@ -46,6 +46,7 @@ import java.util.Map;
 import java.util.Stack;
 import java.util.Vector;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -84,6 +85,7 @@ import javax.swing.undo.UndoManager;
 import org.openrdf.model.Namespace;
 import org.openrdf.model.Resource;
 import org.openrdf.model.Statement;
+import org.openrdf.model.URI;
 import org.openrdf.query.Binding;
 import org.openrdf.query.BooleanQuery;
 import org.openrdf.query.GraphQuery;
@@ -107,9 +109,11 @@ import org.openrdf.repository.http.HTTPRepository;
 
 import static org.openrdf.query.QueryLanguage.*;
 import static org.trebor.splink.Splink.Property.*;
+import static org.trebor.splink.Splink.ResourceType.*;
 import static javax.swing.KeyStroke.getKeyStroke;
 import static java.awt.event.KeyEvent.*;
 import static java.lang.String.format;
+import static java.lang.System.out;
 
 @SuppressWarnings("serial")
 public class Splink extends JFrame
@@ -122,7 +126,7 @@ public class Splink extends JFrame
   public static final String PROTOCOL_IDENTIFIER_RE = "\\w*";
   public static final String SHORT_URI_RE = format("%s(?<!_):%s", URI_IDENTIFIER_RE, URI_IDENTIFIER_RE);
   public static final String LONG_URI_RE = format("%s://.*", PROTOCOL_IDENTIFIER_RE);
-  public static final String LITERAL_RE = format("\".*\"(@%s|\\^\\^%s|\\^\\^%s|)", URI_IDENTIFIER_RE, SHORT_URI_RE, LONG_URI_RE);
+  public static final String LITERAL_RE = format("\"(.*)\"((@|\\^\\^)(%s|%s|%s))?", URI_IDENTIFIER_RE, SHORT_URI_RE, LONG_URI_RE);
   public static final String BLANK_NODE_RE = format("_:%s", URI_IDENTIFIER_RE);
   public static final int NO_QUERY_LIMIT = Integer.MIN_VALUE;
   
@@ -184,6 +188,13 @@ public class Splink extends JFrame
           return type;
       
       return null;
+    }
+    
+    public Matcher parse(String resource)
+    {
+      Matcher matcher = mPattern.matcher(resource);
+      matcher.find();
+      return matcher;
     }
   }
   
@@ -451,8 +462,7 @@ public class Splink extends JFrame
 
           // get the context values
 
-          RepositoryResult<Resource> context;
-          context = mConnection.getContextIDs();
+          RepositoryResult<Resource> context = mConnection.getContextIDs();
 
           while (context.hasNext())
           {
@@ -557,19 +567,19 @@ public class Splink extends JFrame
     }
   }
 
-  private String shortUri(String longUri)
+  public String shortUri(String longUri)
   {
-    for (String name: mNameSpaceMap.keySet())
+    if (LONG_URI.isMatch(longUri))
     {
-      Matcher m = mPrefixRegex.get(name).matcher(longUri);
-      if (m.find())
-        return mNameSpaceMap.get(name) + m.group(1);
+      URI uri = mConnection.getValueFactory().createURI(longUri);
+      String prefix = mNameSpaceMap.get(uri.getNamespace());
+      return null != prefix ? prefix + uri.getLocalName() : longUri;
     }
     
     return longUri;
   }
 
-  private String longUri(String shortUri)
+  public String longUri(String shortUri)
   {
     for (String name: mNameSpaceMap.keySet())
     {
@@ -1108,56 +1118,101 @@ public class Splink extends JFrame
     mResultArea.setViewportView(c);
   }
   
-  private String canonicalizeUri(String uri)
+  class SplinkResource
   {
-    if (uri.startsWith("_"))
+    private final ResourceType mType;
+    private final String mValue;
+    
+    public SplinkResource(String value)
     {
-      setError(
-        "sorry you can't inspect blank nodes like:" +
-        "\n\n   %s\n\nif you now how " +
-        "to make a query which CAN\n" +
-        "ispect such nodes context the splink\n" +
-        "developers at github.com.",
-        uri);
-      return null;
+      mValue = value;
+      mType = establishType(getValue());
     }
-      
-    return uri.startsWith("\"") ? "\"\"" + uri + "\"\"" : "<" + longUri(uri) + ">";
+
+    public String getValue()
+    {
+      return mValue;
+    }
+
+    public ResourceType getType()
+    {
+      return mType;
+    }
+    
+    public String getCanonical()
+    {
+      switch (mType)
+      {
+      case LONG_URI:
+        return "<" + getValue() + ">";
+      case LITERAL:
+        Matcher m = LITERAL.parse(getValue());
+        return format("\"\"\"%s\"\"\"%s",
+          m.group(1).replaceAll("\"", "\\\\\""), m.group(2) == null
+            ? ""
+            : m.group(2));
+      }
+
+      return getValue();
+    }
+    
+    public String toString()
+    {
+      return getCanonical();
+    }
   }
   
-  private void inspectResource(String resource)
+  
+  private void inspectResource(String resourceString)
   {
-    String uri = canonicalizeUri(resource);
-    if (null == uri)
-      return;
+    SplinkResource resource = new SplinkResource(resourceString);
 
-    submitQuery("DESCRIBE " + uri, true, true);
+    switch (resource.getType())
+    {
+    case BLANK_NODE:
+      setError("sorry you can't inspect blank nodes like:"
+        + "\n\n   %s\n\nif you now how " + "to make a query which CAN\n"
+        + "ispect such nodes context the splink\n"
+        + "developers at github.com.", resource);
+      break;
+    case LITERAL:
+      String query =
+        format("SELECT * " + "WHERE { ?subject ?predicate ?object "
+          + "FILTER ( ?subject = %s || ?object = %s)}",
+          resource.getCanonical(), resource.getCanonical());
+      submitQuery(query, true, true);
+      break;
+    default:
+      submitQuery("DESCRIBE " + resource, true, true);
+    }
   }
   
   private void inspectPrefix(String prefix)
   {
-    String query = String.format(
+    String regex = format("regex(str(%%s), str(%s)) ", prefix);
+    
+    String query = format(
       "SELECT * " +
       "WHERE { ?subject ?predicate ?object " +
-      "FILTER (" +
-      "  regex(str(?subject  ), str(%s)) " +
-//      "  || regex(str(?predicate), str(%s)) " +
-      "  || regex(str(?object   ), \"^\" + str(%s)) " +
-      ")}", prefix, prefix, prefix);    
+      "FILTER (" + regex + " || " + regex + ")}", "?subject", "?object");
     submitQuery(query, true, true);
   }
 
   private void inspectContext(String context)
   {
-    String uri = canonicalizeUri(context);
-    if (null == uri)
-      return;
-    String query = String.format(
-      "SELECT * " +
-      "FROM %s " +
-      "WHERE { ?subject ?predicate ?object }",
-      uri); 
-    submitQuery(query, true, true);
+    SplinkResource resource = new SplinkResource(context);
+    switch (resource.getType())
+    {
+    case SHORT_URI:
+    case LONG_URI:
+      String query = String.format(
+        "SELECT * " +
+        "FROM %s " +
+        "WHERE { ?subject ?predicate ?object }",
+        resource); 
+      submitQuery(query, true, true);
+      break;
+    }
   }
   
   
@@ -1351,8 +1406,9 @@ public class Splink extends JFrame
 
       // if there is a query limit, apply it
 
-      int actualLimit = NO_QUERY_LIMIT;
-      if (limitResults && mQueryLimit != NO_QUERY_LIMIT && !(parsedQuery instanceof ParsedGraphQuery))
+      final AtomicInteger actualLimit = new AtomicInteger(NO_QUERY_LIMIT);
+      if (limitResults && mQueryLimit != NO_QUERY_LIMIT &&
+        !(parsedQuery instanceof ParsedGraphQuery))
       {
         final AtomicBoolean hasLimit = new AtomicBoolean(false);
         parsedQuery.getTupleExpr().visit(
@@ -1360,6 +1416,7 @@ public class Splink extends JFrame
           {
             public void meet(Slice node) throws Exception
             {
+              actualLimit.set(node.getLimit());
               hasLimit.set(true);
             }
           });
@@ -1367,7 +1424,7 @@ public class Splink extends JFrame
         if (!hasLimit.get())
         {
           queryString += "\nLIMIT " + mQueryLimit;
-          actualLimit = mQueryLimit;
+          actualLimit.set(mQueryLimit);
         }
       }
 
@@ -1395,7 +1452,9 @@ public class Splink extends JFrame
 
       else if (parsedQuery instanceof ParsedTupleQuery)
       {
-        setMessage("Querying...");
+        setMessage("Querying%s...", actualLimit.get() == NO_QUERY_LIMIT
+          ? " (no limit)"
+          : " with limit " + actualLimit.get());
         TupleQuery query =
           mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
         query.setIncludeInferred(includeInffered);
@@ -1404,22 +1463,28 @@ public class Splink extends JFrame
         int columns = result.getBindingNames().size();
         setMessage("seconds: %2.2f, cols: %d, rows: %d%s",
           (System.currentTimeMillis() - startTime) / 1000.f, columns, rows,
-          rows == actualLimit ? " (limited)" : "");
+          rows == actualLimit.get()
+            ? " (limited)"
+            : "");
       }
 
       // if this is a reduced, create an graph query
 
       else if (parsedQuery instanceof ParsedGraphQuery)
       {
-        setMessage("Querying...");
+        setMessage("Querying%s...", actualLimit.get() == NO_QUERY_LIMIT
+          ? " (no limit)"
+          : " with limit " + actualLimit.get());
         GraphQuery query =
           mConnection.prepareGraphQuery(QueryLanguage.SPARQL, queryString);
         query.setIncludeInferred(includeInffered);
         GraphQueryResult result = query.evaluate();
         int rows = resultProcessor.process(result);
         setMessage("seconds: %2.2f, cols: %d, rows: %d %s",
-          (System.currentTimeMillis() - startTime) / 1000.f, 3, rows, 
-          rows == actualLimit ? " (limited)" : "");
+          (System.currentTimeMillis() - startTime) / 1000.f, 3, rows,
+          rows == actualLimit.get()
+            ? " (limited)"
+            : "");
       }
       else
       {
@@ -1435,7 +1500,7 @@ public class Splink extends JFrame
 
   public void debugMessage(String message, Object... args)
   {
-    System.out.println(format(message, args));
+    out.format(message + "\n", args);
     if (null != mStatusBar)
       setMessage(Color.BLUE, message, args);
   }
@@ -1635,10 +1700,14 @@ public class Splink extends JFrame
     {
       try
       {
-        getCurrentEditor().getDocument().insertString(
-          getCurrentEditor().getCaretPosition(),
+        String value =
           mPopupTable.getValueAt(mPopupTableRow, mPopupTableColumn)
-            .toString(), null);
+            .toString();
+
+        SplinkResource resource = new SplinkResource(value);
+        
+        getCurrentEditor().getDocument().insertString(
+          getCurrentEditor().getCaretPosition(), resource.getCanonical(), null);
       }
       catch (BadLocationException e1)
       {
