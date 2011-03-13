@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.trebor</groupId>
   <artifactId>splink</artifactId>
-  <version>0.6-alpha</version>
+  <version>0.7-alpha</version>
   <name>Splink</name>
   <url>http://maven.apache.org</url>
 
