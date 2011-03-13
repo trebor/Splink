@@ -89,6 +89,7 @@ import org.openrdf.model.Resource;
 import org.openrdf.model.Statement;
 import org.openrdf.model.URI;
 import org.openrdf.query.Binding;
+import org.openrdf.query.BindingSet;
 import org.openrdf.query.BooleanQuery;
 import org.openrdf.query.GraphQuery;
 import org.openrdf.query.GraphQueryResult;
@@ -147,7 +148,7 @@ public class Splink extends JFrame
   private JTextArea mErrorText;
   private JMenu mRepositoryListMenu;
   private JLabel mStatusBar;
-  private List<String> mRepositoryList;
+  private Map<String, String> mRepositoryList;
   private JCheckBoxMenuItem mShowLongUriCbmi;
   private JCheckBoxMenuItem mShowInferencedCbmi;
   private TableModel mPrefixTable;
@@ -336,7 +337,7 @@ public class Splink extends JFrame
   {
     initializeRepository("SYSTEM");
     
-    String query = mQueryPrefixString +  "SELECT ?o WHERE {?_ sys:repositoryID ?o}";
+    String query = mQueryPrefixString +  "SELECT ?name ?label WHERE {?_ sys:repositoryID ?name. ?_ rdfs:label ?label}";
     
     // extract repository list
     performQuery(query, false, false, new QueryResultsProcessor()
@@ -344,18 +345,21 @@ public class Splink extends JFrame
       public int process(TupleQueryResult result)
         throws QueryEvaluationException
       {
-        mRepositoryList = new ArrayList<String>();
-        String columnName = result.getBindingNames().get(0);
+        mRepositoryList = new HashMap<String, String>();
+        String nameColumn = result.getBindingNames().get(0);
+        String labelColumn = result.getBindingNames().get(1);
         while (result.hasNext())
-          // populate the repository menu
-          mRepositoryList.add(result.next().getValue(columnName)
-            .stringValue());
+        {
+          BindingSet row = result.next();
+          mRepositoryList.put(row.getValue(nameColumn)
+            .stringValue(), row.getValue(labelColumn).stringValue());
+        }
 
 
         boolean found = false;
         ButtonGroup radioButtonGroup = new ButtonGroup();
         mRepositoryListMenu.removeAll();
-        for (final String repositoryName : mRepositoryList)
+        for (final String repositoryName : mRepositoryList.keySet())
         {
           JRadioButtonMenuItem button =
             new JRadioButtonMenuItem(new AbstractAction(repositoryName)
@@ -367,6 +371,8 @@ public class Splink extends JFrame
               }
             });
 
+          button.setToolTipText(mRepositoryList.get(repositoryName));
+          
           if (SESAME_REPOSITORY.getString().equals(repositoryName))
           {
             button.setSelected(true);
@@ -1716,13 +1722,14 @@ public class Splink extends JFrame
     }
   };  
 
-  private SplinkAction mReloadNameSpace = new SplinkAction("Reload Namespace", getKeyStroke(VK_N, META_MASK),  "refresh the prefix table values")
+  private SplinkAction mReloadNameSpace = new SplinkAction("Reinitialize Connection", getKeyStroke(VK_N, META_MASK),  "refresh repository list, prefixes and contexts")
   {
     public void actionPerformed(ActionEvent e)
     {
-      initializePrefixes();
+      initializeRepositoryList();
+      initializeRepository(SESAME_REPOSITORY.getString());
     }
-  };  
+  };
 
   private SplinkAction mNewQueryTab = new SplinkAction("New Query", getKeyStroke(VK_T, META_MASK),  "create a new query editor")
   {
