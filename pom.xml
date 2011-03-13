@@ -64,6 +64,7 @@
   </repositories>
 
   <properties>
+    <packageName>${name}-${version}</packageName>
   </properties>
 
   <dependencies>
@@ -100,7 +101,7 @@
   </dependencies>
 
   <build>
-    <finalName>Splink</finalName>
+    <finalName>${packageName}</finalName>
     <plugins>
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
@@ -123,6 +124,8 @@
       <plugin>
         <artifactId>maven-assembly-plugin</artifactId>
         <configuration>
+          <finalName>${packageName}</finalName>
+          <appendAssemblyId>false</appendAssemblyId>
           <descriptorRefs>
             <descriptorRef>jar-with-dependencies</descriptorRef>
           </descriptorRefs>
