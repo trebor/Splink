@@ -28,6 +28,7 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.datatransfer.StringSelection;
@@ -77,6 +78,7 @@ import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableColumn;
+import javax.swing.table.TableColumnModel;
 import javax.swing.table.TableModel;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.PlainDocument;
@@ -114,6 +116,7 @@ import static javax.swing.KeyStroke.getKeyStroke;
 import static java.awt.event.KeyEvent.*;
 import static java.lang.String.format;
 import static java.lang.System.out;
+import static java.lang.Math.max;
 
 @SuppressWarnings("serial")
 public class Splink extends JFrame
@@ -557,6 +560,7 @@ public class Splink extends JFrame
         prefixCol.setHeaderRenderer(mTableHeaderRenderer);
         valueCol.setPreferredWidth(PREFIX_COL2_WIDTH.getInteger());
         valueCol.setHeaderRenderer(mTableHeaderRenderer);
+        adjustTablesColumns(mPrefix);
       }
 
       setMessage("initialized namespace.");
@@ -818,6 +822,7 @@ public class Splink extends JFrame
     mResult.setFont(RESULT_FONT.getFont());
     mResult.setForeground(RESULT_FONT_CLR.getColor());
     mResult.setSelectionForeground(RESULT_FONT_CLR.getColor());
+    mResult.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
     
     // look for popup menu mouse events
     
@@ -1115,9 +1120,40 @@ public class Splink extends JFrame
 
   public void setResultComponent(Component c)
   {
+    if (c instanceof JTable)
+      adjustTablesColumns((JTable)c);
     mResultArea.setViewportView(c);
   }
   
+  public void adjustTablesColumns(JTable table)
+  {
+    TableColumnModel columnModel = table.getColumnModel();
+    TableModel model = table.getModel();
+    int count = model.getColumnCount();
+    
+    for (int c = 0; c < count; ++c)
+    {
+      TableColumn column = columnModel.getColumn(c);
+
+      int width =
+        establishStringWidth(
+          column.getHeaderValue().toString(),
+          column.getHeaderRenderer()
+            .getTableCellRendererComponent(table, null, false, false, 0, c)
+            .getFont());
+
+      for (int r = 0; r < model.getRowCount(); ++r)
+      {
+        Object text = model.getValueAt(r, c);
+        if (null != text)
+          width =
+            max(width, establishStringWidth(text.toString(), table.getFont()));
+      }
+
+      column.setPreferredWidth(width);
+    }
+  }
+
   class SplinkResource
   {
     private final ResourceType mType;
@@ -1277,6 +1313,12 @@ public class Splink extends JFrame
     }.start();
   }
   
+  private Integer establishStringWidth(String string, Font font)
+  {
+    FontMetrics metrics = getFontMetrics(font);
+    return metrics.stringWidth(" " + string);
+  }
+
   public interface QueryResultsProcessor
   {
     int process(TupleQueryResult result) throws QueryEvaluationException;
@@ -1286,115 +1328,129 @@ public class Splink extends JFrame
     boolean process(boolean result);
   }
   
-  private QueryResultsProcessor mDefaultResultsProcessor = new QueryResultsProcessor()
-  {
-    public int process(TupleQueryResult result) throws QueryEvaluationException
+  private QueryResultsProcessor mDefaultResultsProcessor =
+    new QueryResultsProcessor()
     {
-      // create the table model
-      
-      DefaultTableModel tm = new DefaultTableModel()
+      public int process(TupleQueryResult result)
+        throws QueryEvaluationException
       {
-        public boolean isCellEditable(int row, int column)
+        out.format("Results: %s", result);
+
+        // create the table model
+
+        DefaultTableModel tm = new DefaultTableModel()
         {
-          return false;
-        }
-      };
-      
-      for (String binding: result.getBindingNames())
-        tm.addColumn(binding);
-      
-      // populate the table
-      
-      while (result.hasNext())
-      {
-        Vector<String> row = new Vector<String>();
-        Iterator<Binding> rowData = result.next().iterator();
-        while (rowData.hasNext())
+          public boolean isCellEditable(int row, int column)
+          {
+            return false;
+          }
+        };
+
+        // add columnds to table
+
+        Map<String, Integer> columnMap = new HashMap<String, Integer>();
+        for (String binding : result.getBindingNames())
         {
-          String uri = rowData.next().getValue().toString();
-          if (!mShowLongUriCbmi.getState())
-            uri = shortUri(uri);
-          row.add(uri);
+          columnMap.put(binding, tm.getColumnCount());
+          tm.addColumn(binding);
         }
-        tm.addRow(row);
+
+        // populate the table
+
+        while (result.hasNext())
+        {
+          String[] row = new String[columnMap.size()];
+          Iterator<Binding> rowData = result.next().iterator();
+          while (rowData.hasNext())
+          {
+            Binding rowBinding = rowData.next();
+            String binding = rowBinding.getName();
+            String uri = rowBinding.getValue().toString();
+            if (!mShowLongUriCbmi.getState())
+              uri = shortUri(uri);
+            row[columnMap.get(binding)] = uri;
+          }
+
+          tm.addRow(row);
+        }
+
+        // update the display
+
+        mResult.setModel(tm);
+        TableColumnModel columnModel = mResult.getColumnModel();
+        for (int i = 0; i < tm.getColumnCount(); ++i)
+          columnModel.getColumn(i).setHeaderRenderer(mTableHeaderRenderer);
+        setResultComponent(mResult);
+
+        // return row count
+
+        return tm.getRowCount();
       }
       
-      // update the display
-
-      mResult.setModel(tm);
-      for (int i = 0; i < tm.getColumnCount(); ++i)
-        mResult.getColumnModel().getColumn(i).setHeaderRenderer(mTableHeaderRenderer);
-
-      setResultComponent(mResult);
-      
-      // return row count
-      
-      return tm.getRowCount();
-    }
-    
-    public int process(GraphQueryResult result) throws QueryEvaluationException
-    {
-      // create the table model
-      
-      DefaultTableModel tm = new DefaultTableModel()
+      public int process(GraphQueryResult result)
+        throws QueryEvaluationException
       {
-        public boolean isCellEditable(int row, int column)
-        {
-          return false;
-        }
-      };
-      
-      // add columns
-      
-      for (String name: new String[] {"subject", "predicate", "object"})
-        tm.addColumn(name);
-      
-      // populate the table
+        // create the table model
 
-      while (result.hasNext())
-      {
-        Vector<String> row = new Vector<String>();
-        Statement rowData = result.next();
-        if (mShowLongUriCbmi.getState()) 
+        DefaultTableModel tm = new DefaultTableModel()
         {
-          row.add(rowData.getSubject().toString());
-          row.add(rowData.getPredicate().toString());
-          row.add(rowData.getObject().toString());
-        }
-        else
+          public boolean isCellEditable(int row, int column)
+          {
+            return false;
+          }
+        };
+
+        // add columns
+
+        for (String name : new String[]{"subject", "predicate", "object"}) 
+          tm.addColumn(name);
+
+        // populate the table
+
+        while (result.hasNext())
         {
-          row.add(shortUri(rowData.getSubject().toString()));
-          row.add(shortUri(rowData.getPredicate().toString()));
-          row.add(shortUri(rowData.getObject().toString()));
+          Vector<String> row = new Vector<String>();
+          Statement rowData = result.next();
+          if (mShowLongUriCbmi.getState())
+          {
+            row.add(rowData.getSubject().toString());
+            row.add(rowData.getPredicate().toString());
+            row.add(rowData.getObject().toString());
+          }
+          else
+          {
+            row.add(shortUri(rowData.getSubject().toString()));
+            row.add(shortUri(rowData.getPredicate().toString()));
+            row.add(shortUri(rowData.getObject().toString()));
+          }
+
+          tm.addRow(row);
         }
 
-        tm.addRow(row);
+        // update the display
+
+        mResult.setModel(tm);
+        for (int i = 0; i < tm.getColumnCount(); ++i)
+          mResult.getColumnModel().getColumn(i).setHeaderRenderer(mTableHeaderRenderer);
+        setResultComponent(mResult);
+
+        // return row count
+
+        return tm.getRowCount();
       }
-      
-      // update the display
 
-      mResult.setModel(tm);
-      for (int i = 0; i < tm.getColumnCount(); ++i)
-        mResult.getColumnModel().getColumn(i).setHeaderRenderer(mTableHeaderRenderer);
-
-      setResultComponent(mResult);
-      
-      // return row count
-      
-      return tm.getRowCount();
-    }
-
-    public boolean process(boolean result)
-    {
-      JLabel resultComponent = new JLabel(format("%b", result).toUpperCase());
-      resultComponent.setFont(RESULT_FONT.getFont().deriveFont(150f));
-      resultComponent.setForeground(RESULT_FONT_CLR.getColor());
-      resultComponent.setVerticalAlignment(JLabel.CENTER);
-      resultComponent.setHorizontalAlignment(JLabel.CENTER);
-      setResultComponent(resultComponent);
-      return result;
-    }
-  };
+      public boolean process(boolean result)
+      {
+        JLabel resultComponent =
+          new JLabel(format("%b", result).toUpperCase());
+        resultComponent.setFont(RESULT_FONT.getFont().deriveFont(150f));
+        resultComponent.setForeground(RESULT_FONT_CLR.getColor());
+        resultComponent.setVerticalAlignment(JLabel.CENTER);
+        resultComponent.setHorizontalAlignment(JLabel.CENTER);
+        setResultComponent(resultComponent);
+        return result;
+      }
+    };
   
   public void performQuery(String queryString, boolean includeInffered,
     boolean limitResults, QueryResultsProcessor resultProcessor)
