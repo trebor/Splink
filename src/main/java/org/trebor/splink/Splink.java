@@ -39,10 +39,8 @@ import java.awt.event.MouseListener;
 import java.io.File;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.Stack;
 import java.util.Vector;
@@ -110,6 +108,8 @@ import org.openrdf.repository.RepositoryException;
 import org.openrdf.repository.RepositoryResult;
 import org.openrdf.repository.http.HTTPRepository;
 
+import com.sun.media.sound.Toolkit;
+
 import static org.openrdf.query.QueryLanguage.*;
 import static org.trebor.splink.Splink.Property.*;
 import static org.trebor.splink.Splink.ResourceType.*;
@@ -122,15 +122,16 @@ import static java.lang.Math.max;
 @SuppressWarnings("serial")
 public class Splink extends JFrame
 {
-  public static final String PROPERTIES_FILE = System.getProperty("user.home") + File.separator + ".splink";
+  public static final String QUERY_REPO_NAME_DESCRIPTION = "SELECT ?name ?label WHERE {?_ sys:repositoryID ?name. ?_ rdfs:label ?label}";
   public static final String DEFAULT_QUERY = "SELECT\n\t*\nWHERE\n{\n\t?s ?p ?o\n}";
+  public static final String PROPERTIES_FILE = System.getProperty("user.home") + File.separator + ".splink";
   public static final String QUERY_NAME_KEY_BASE = "query.name.";
   public static final String QUERY_VALUE_KEY_BASE = "query.value.";
   public static final String URI_IDENTIFIER_RE = "[a-zA-Z_0-9\\.\\-]*";
   public static final String PROTOCOL_IDENTIFIER_RE = "\\w*";
   public static final String SHORT_URI_RE = format("%s(?<!_):%s", URI_IDENTIFIER_RE, URI_IDENTIFIER_RE);
   public static final String LONG_URI_RE = format("%s://.*", PROTOCOL_IDENTIFIER_RE);
-  public static final String LITERAL_RE = format("\"(.*)\"((@|\\^\\^)(%s|%s|%s))?", URI_IDENTIFIER_RE, SHORT_URI_RE, LONG_URI_RE);
+  public static final String LITERAL_RE = format("\"(\\p{ASCII}*)\"((@|\\^\\^)(%s|%s|%s))?", URI_IDENTIFIER_RE, SHORT_URI_RE, LONG_URI_RE);
   public static final String BLANK_NODE_RE = format("_:%s", URI_IDENTIFIER_RE);
   public static final int NO_QUERY_LIMIT = Integer.MIN_VALUE;
   
@@ -150,7 +151,7 @@ public class Splink extends JFrame
   private JLabel mStatusBar;
   private Map<String, String> mRepositoryList;
   private JCheckBoxMenuItem mShowLongUriCbmi;
-  private JCheckBoxMenuItem mShowInferencedCbmi;
+  private JCheckBoxMenuItem mShowInferredCbmi;
   private TableModel mPrefixTable;
   private TableModel mContextTable;
   private String mQueryPrefixString;
@@ -168,16 +169,16 @@ public class Splink extends JFrame
   
   enum ResourceType
   {    
-    SHORT_URI(SHORT_URI_RE),
-    LONG_URI(LONG_URI_RE),
-    BLANK_NODE(BLANK_NODE_RE),
+    SHORT_URI("^" + SHORT_URI_RE + "$"),
+    LONG_URI("^" + LONG_URI_RE + "$"),
+    BLANK_NODE("^" + BLANK_NODE_RE + "$"),
     LITERAL(LITERAL_RE);
     
     private final Pattern mPattern;
     
     ResourceType(String regex)
     {
-      mPattern = Pattern.compile("^" + regex + "$");
+      mPattern = Pattern.compile(regex);
     }
     
     public boolean isMatch(String uri)
@@ -236,7 +237,10 @@ public class Splink extends JFrame
     
     RESULT_SIZE("gui.result.size", Dimension.class, new Dimension(900, 400)),
     RESULT_FONT("gui.result.font", Font.class, new Font("Courier", Font.BOLD, 15)),
-    RESULT_FONT_CLR("gui.result.color", Color.class, Color.DARK_GRAY);
+    RESULT_FONT_CLR("gui.result.color", Color.class, Color.DARK_GRAY),
+    
+    OPTION_SHOW_LONG_URI("option.show.longuri", Boolean.class, false),
+    OPTION_SHOW_INFERRED("option.show.inferred", Boolean.class, true);
     
     final private String mName;
     final private Class<?> mType;
@@ -337,10 +341,10 @@ public class Splink extends JFrame
   {
     initializeRepository("SYSTEM");
     
-    String query = mQueryPrefixString +  "SELECT ?name ?label WHERE {?_ sys:repositoryID ?name. ?_ rdfs:label ?label}";
-    
-    // extract repository list
-    performQuery(query, false, false, new QueryResultsProcessor()
+    // get repo list
+
+    performQuery(mQueryPrefixString + QUERY_REPO_NAME_DESCRIPTION, 
+      false, false, new QueryResultsProcessor()
     {
       public int process(TupleQueryResult result)
         throws QueryEvaluationException
@@ -1054,9 +1058,10 @@ public class Splink extends JFrame
     JMenu optionMenu = new JMenu("Options");
     menuBar.add(optionMenu);
     optionMenu.add(mShowLongUriCbmi = new JCheckBoxMenuItem(mShowLongUri));
-    optionMenu.add(mShowInferencedCbmi =
-      new JCheckBoxMenuItem(mShowInferenced));
-    mShowInferencedCbmi.setSelected(true);
+    mShowLongUriCbmi.setSelected(OPTION_SHOW_LONG_URI.getBoolean());
+    optionMenu.add(mShowInferredCbmi =
+      new JCheckBoxMenuItem(mShowInferred));
+    mShowInferredCbmi.setSelected(OPTION_SHOW_INFERRED.getBoolean());
 
     // create the table popup menu
 
@@ -1310,7 +1315,7 @@ public class Splink extends JFrame
         mSubmiteQuery.setEnabled(false);
         mPreviousQuery.setEnabled(false);
 
-        performQuery(fullQuery, mShowInferencedCbmi.isSelected(), true,
+        performQuery(fullQuery, mShowInferredCbmi.isSelected(), true,
           mDefaultResultsProcessor);
 
         mSubmiteQuery.setEnabled(submitEnabled);
@@ -1704,19 +1709,21 @@ public class Splink extends JFrame
     }
   };
   
-  private SplinkAction mShowLongUri = new SplinkAction("Long URI", getKeyStroke(VK_L, CTRL_MASK),  "show result URIs in long form")
+  private SplinkAction mShowLongUri = new SplinkAction("Long URI", getKeyStroke(VK_L, META_MASK),  "show result URIs in long form")
   {
     public void actionPerformed(ActionEvent e)
     {
+      OPTION_SHOW_LONG_URI.set(mShowLongUriCbmi.isSelected());
       if (null != mLastQuery)
         submitQuery(mLastQuery, false, false);
     }
   };
   
-  private SplinkAction mShowInferenced = new SplinkAction("Include Inferenced", getKeyStroke(VK_I, CTRL_MASK),  "return results which include inferenced tripples")
+  private SplinkAction mShowInferred = new SplinkAction("Include Inferred", getKeyStroke(VK_I, META_MASK),  "return results which include inferred tripples")
   {
     public void actionPerformed(ActionEvent e)
     {
+      OPTION_SHOW_INFERRED.set(mShowInferredCbmi.isSelected());
       if (null != mLastQuery)
         submitQuery(mLastQuery, false, false);
     }
@@ -1910,7 +1917,7 @@ public class Splink extends JFrame
         mProperties.remove(queryValueKey);
         done = false;
       }
-    }      
+    } 
 
     // store the query editors
 

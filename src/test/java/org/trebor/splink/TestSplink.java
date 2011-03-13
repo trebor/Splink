@@ -9,7 +9,6 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.junit.Ignore;
 import org.junit.Test;
 import org.trebor.splink.Splink.ResourceType;
 
@@ -41,9 +40,9 @@ public class TestSplink
         put("\"hello my name is fred\"^^xsd:integer", LITERAL);
         put("\"hello my name is fred\"^^http://www.w3.org/2001/XMLSchema#integer", LITERAL);
         put("\"hello my name is \"fred\"\"^^http://www.w3.org/2001/XMLSchema#integer", LITERAL);
+        put("\"foo\nbar\"", LITERAL);
       }
     };
-
   
   @Test
   public void testUri()
@@ -55,6 +54,8 @@ public class TestSplink
   @Test
   public void testParseLiteral()
   {
+    out.format("start\n");
+    
     for (String uri: RESOURCE_EXAMPLES.keySet())
     {
       if (RESOURCE_EXAMPLES.get(uri) == LITERAL)
@@ -68,6 +69,8 @@ public class TestSplink
         out.format("\"\"\"%s\"\"\"%s\n", m.group(1).replaceAll("\"", "\\\\\""), m.group(2) == null ? "" : m.group(2));
       }
     }
+    
+    out.format("end\n");
   }
   
   @Test

@@ -220,7 +220,7 @@ public class Properties extends java.util.Properties {
      * @param value the value that this property will take
      */
     public void set(String name, Integer value) {
-        setProperty(name, "" + value);
+        setProperty(name, value.toString());
     }
 
     /**
@@ -230,10 +230,11 @@ public class Properties extends java.util.Properties {
      * @param name  the name of the property
      * @param value the value that this property will take
      */
-    public void set(String name, boolean value) {
-        setProperty(name, value ? "TRUE" : "FALSE");
+    
+    public void set(String name, Boolean value) {
+        setProperty(name, value.toString());
     }
-
+    
     /**
      * Sets a double property.  If the property does not exist, it will be
      * created with the specified value.
