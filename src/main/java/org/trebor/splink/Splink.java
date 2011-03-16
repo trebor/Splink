@@ -1172,6 +1172,16 @@ public class Splink extends JFrame
     updateEnabled();
   }
 
+  public void setReslutAreaMessage(String message, Font font, Color color)
+  {
+    JLabel resultComponent = new JLabel(message);
+    resultComponent.setFont(font);
+    resultComponent.setForeground(color);
+    resultComponent.setVerticalAlignment(JLabel.CENTER);
+    resultComponent.setHorizontalAlignment(JLabel.CENTER);
+    setResultComponent(resultComponent);
+  }
+  
   public void setResultComponent(Component c)
   {
     if (c instanceof JTable)
@@ -1495,13 +1505,8 @@ public class Splink extends JFrame
 
       public boolean process(boolean result)
       {
-        JLabel resultComponent =
-          new JLabel(format("%b", result).toUpperCase());
-        resultComponent.setFont(RESULT_FONT.getFont().deriveFont(150f));
-        resultComponent.setForeground(RESULT_FONT_CLR.getColor());
-        resultComponent.setVerticalAlignment(JLabel.CENTER);
-        resultComponent.setHorizontalAlignment(JLabel.CENTER);
-        setResultComponent(resultComponent);
+        setReslutAreaMessage(format("%b", result).toUpperCase(), RESULT_FONT
+          .getFont().deriveFont(150f), RESULT_FONT_CLR.getColor());
         return result;
       }
     };
@@ -1548,7 +1553,11 @@ public class Splink extends JFrame
 
       if (parsedQuery instanceof ParsedBooleanQuery)
       {
-        setMessage("Querying...");
+        String message = "Asking...";
+        setMessage(message);
+        setReslutAreaMessage(message, RESULT_FONT.getFont().deriveFont(50f),
+          RESULT_FONT_CLR.getColor());
+
         BooleanQuery query =
           mConnection.prepareBooleanQuery(QueryLanguage.SPARQL, queryString);
         query.setIncludeInferred(includeInffered);
@@ -1562,9 +1571,13 @@ public class Splink extends JFrame
 
       else if (parsedQuery instanceof ParsedTupleQuery)
       {
-        setMessage("Querying%s...", actualLimit.get() == NO_QUERY_LIMIT
+        String message = format("Querying%s...", actualLimit.get() == NO_QUERY_LIMIT
           ? " (no limit)"
           : " with limit " + actualLimit.get());
+        setMessage(message);
+        setReslutAreaMessage(message, RESULT_FONT.getFont().deriveFont(50f),
+          RESULT_FONT_CLR.getColor());
+        
         TupleQuery query =
           mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
         query.setIncludeInferred(includeInffered);
@@ -1582,9 +1595,12 @@ public class Splink extends JFrame
 
       else if (parsedQuery instanceof ParsedGraphQuery)
       {
-        setMessage("Querying%s...", actualLimit.get() == NO_QUERY_LIMIT
+        String message = format("Describing%s...", actualLimit.get() == NO_QUERY_LIMIT
           ? " (no limit)"
           : " with limit " + actualLimit.get());
+        setMessage(message);
+        setReslutAreaMessage(message, RESULT_FONT.getFont().deriveFont(50f),
+          RESULT_FONT_CLR.getColor());
         GraphQuery query =
           mConnection.prepareGraphQuery(QueryLanguage.SPARQL, queryString);
         query.setIncludeInferred(includeInffered);
