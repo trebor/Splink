@@ -50,7 +50,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import javax.swing.AbstractAction;
+import javax.swing.ActionMap;
 import javax.swing.ButtonGroup;
+import javax.swing.InputMap;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JEditorPane;
 import javax.swing.JFrame;
@@ -69,6 +71,8 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
 import javax.swing.ToolTipManager;
 import javax.swing.border.LineBorder;
+import javax.swing.event.CaretEvent;
+import javax.swing.event.CaretListener;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 import javax.swing.event.UndoableEditEvent;
@@ -79,6 +83,8 @@ import javax.swing.table.TableColumn;
 import javax.swing.table.TableColumnModel;
 import javax.swing.table.TableModel;
 import javax.swing.text.BadLocationException;
+import javax.swing.text.DefaultEditorKit;
+import javax.swing.text.Document;
 import javax.swing.text.PlainDocument;
 import javax.swing.undo.UndoManager;
 
@@ -107,8 +113,6 @@ import org.openrdf.repository.RepositoryConnection;
 import org.openrdf.repository.RepositoryException;
 import org.openrdf.repository.RepositoryResult;
 import org.openrdf.repository.http.HTTPRepository;
-
-import com.sun.media.sound.Toolkit;
 
 import static org.openrdf.query.QueryLanguage.*;
 import static org.trebor.splink.Splink.Property.*;
@@ -166,6 +170,7 @@ public class Splink extends JFrame
   private int mPopupTableRow;
   private int mPopupTableColumn;
   private Map<JEditorPane, UndoManager> mEditorUndoManagerMap;
+  private StringBuffer mKillRing = new StringBuffer();
   
   enum ResourceType
   {    
@@ -804,6 +809,12 @@ public class Splink extends JFrame
     return mEditorTab.getSelectedIndex();
   }
 
+  @SuppressWarnings("unused")
+  private JEditorPane getEditor()
+  {
+    return getEditor(getEditorIndex());
+  }
+
   private JEditorPane getEditor(int index)
   {
     if (index >= mEditorTab.getTabCount())
@@ -1004,8 +1015,6 @@ public class Splink extends JFrame
     menuBar.add(editMenu);
     editMenu.add(mCopyQuery);
     editMenu.addSeparator();
-    editMenu.add(mUndoAction);
-    editMenu.add(mRedoAction);
 
     // store menu
 
@@ -1097,7 +1106,41 @@ public class Splink extends JFrame
     editor.setForeground(EDITOR_FONT_CLR.getColor());
     editor.getDocument().putProperty(PlainDocument.tabSizeAttribute,
       EDITOR_TAB_SIZE.getInteger());
+
+    // get the action map and input map
     
+    ActionMap actionMap = editor.getActionMap();
+    InputMap inputMap = editor.getInputMap();
+    
+    // add undo and redo
+    
+    editor.getActionMap().put(mUndoAction.getDescription(), mUndoAction);
+    editor.getInputMap().put(mUndoAction.getKeyStroke(), mUndoAction.getDescription());
+    editor.getActionMap().put(mRedoAction.getDescription(), mRedoAction);
+    editor.getInputMap().put(mRedoAction.getKeyStroke(), mRedoAction.getDescription());
+
+    // add emacs options
+    
+    actionMap.put(mEditKill.getDescription(), mEditKill);
+    inputMap.put(mEditKill.getKeyStroke(), mEditKill.getDescription());
+    editor.getInputMap().put(getKeyStroke(VK_Y, CTRL_MASK), DefaultEditorKit.pasteAction);
+    editor.getInputMap().put(getKeyStroke(VK_SLASH, CTRL_MASK), mUndoAction.getDescription());
+    
+    editor.addCaretListener(new CaretListener()
+    {
+      private int mDot = Integer.MIN_VALUE;
+      private int mMark = Integer.MIN_VALUE;
+      
+      public void caretUpdate(CaretEvent event)
+      {
+        if (event.getDot() != mDot ||  event.getMark() != mMark)
+          mKillRing = new StringBuffer();
+
+        mDot = event.getDot();
+        mMark = event.getMark();
+      }
+    });
+
     // set the editor text
     
     editor.setText(query);
@@ -1648,6 +1691,16 @@ public class Splink extends JFrame
      */
 
     abstract public void actionPerformed(ActionEvent e);
+    
+    public String getDescription()
+    {
+      return (String)getValue(SHORT_DESCRIPTION);
+    }
+
+    public KeyStroke getKeyStroke()
+    {
+      return (KeyStroke)getValue(ACCELERATOR_KEY);
+    }
   }
 
   class QueryLimitAction extends SplinkAction
@@ -1786,7 +1839,51 @@ public class Splink extends JFrame
     }
   };
   
-  
+  private SplinkAction mEditKill = new SplinkAction("Kill", getKeyStroke(VK_K, CTRL_MASK),  "cut the text to the end of the line and put it in the clipboard") 
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      try
+      {
+        // get editor and document
+        
+        JEditorPane editor = (JEditorPane)e.getSource();
+        Document doc = editor.getDocument();
+        
+        // get the text at the caret
+        
+        int caret = editor.getCaretPosition();
+        String text = doc.getText(caret, doc.getLength() - caret);
+        
+        // find the next carrage return
+        
+        int end = text.indexOf("\n");
+        
+        // if none then assem end of document
+        
+        if (-1 == end)
+          end = text.length();
+        
+        // if no length and more text assuem at end of line
+        
+        if (end == 0 && text.length() > 0)
+           end = 1;
+
+        // stow text and kill it
+        
+        mKillRing.append(text.substring(0, end));
+        doc.remove(caret, end);
+        
+        StringSelection ss = new StringSelection(mKillRing.toString());
+        getToolkit().getSystemClipboard().setContents(ss, null);
+      }
+      catch (BadLocationException e1)
+      {
+        setError(e1);
+      }
+    }
+  };
+
   private SplinkAction mQueryRight = new SplinkAction("Right Query",
     getKeyStroke(VK_RIGHT, META_MASK + ALT_MASK),
     "select query editor to the right")
