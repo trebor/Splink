@@ -113,6 +113,10 @@ import org.openrdf.repository.RepositoryConnection;
 import org.openrdf.repository.RepositoryException;
 import org.openrdf.repository.RepositoryResult;
 import org.openrdf.repository.http.HTTPRepository;
+import org.openrdf.rio.RDFFormat;
+import org.openrdf.rio.RDFHandlerException;
+import org.openrdf.rio.RDFWriter;
+import org.openrdf.rio.Rio;
 
 import static org.openrdf.query.QueryLanguage.*;
 import static org.trebor.splink.Splink.Property.*;
@@ -135,7 +139,7 @@ public class Splink extends JFrame
   public static final String PROTOCOL_IDENTIFIER_RE = "\\w*";
   public static final String SHORT_URI_RE = format("%s(?<!_):%s", URI_IDENTIFIER_RE, URI_IDENTIFIER_RE);
   public static final String LONG_URI_RE = format("%s://.*", PROTOCOL_IDENTIFIER_RE);
-  public static final String LITERAL_RE = format("\"(\\p{ASCII}*)\"((@|\\^\\^)(%s|%s|%s))?", URI_IDENTIFIER_RE, SHORT_URI_RE, LONG_URI_RE);
+  public static final String LITERAL_RE = format("\"(\\p{ASCII}*)\"((@|\\^\\^)(%s|%s|<%s>))?", URI_IDENTIFIER_RE, SHORT_URI_RE, LONG_URI_RE);
   public static final String BLANK_NODE_RE = format("_:%s", URI_IDENTIFIER_RE);
   public static final int NO_QUERY_LIMIT = Integer.MIN_VALUE;
   
@@ -203,7 +207,7 @@ public class Splink extends JFrame
     public Matcher parse(String resource)
     {
       Matcher matcher = mPattern.matcher(resource);
-      matcher.find();
+      matcher.matches();
       return matcher;
     }
   }
@@ -243,6 +247,7 @@ public class Splink extends JFrame
     RESULT_SIZE("gui.result.size", Dimension.class, new Dimension(900, 400)),
     RESULT_FONT("gui.result.font", Font.class, new Font("Courier", Font.BOLD, 15)),
     RESULT_FONT_CLR("gui.result.color", Color.class, Color.DARK_GRAY),
+    RESULT_MESSAGE_CLR("gui.result.message-color", Color.class, Color.LIGHT_GRAY),
     
     OPTION_SHOW_LONG_URI("option.show.longuri", Boolean.class, false),
     OPTION_SHOW_INFERRED("option.show.inferred", Boolean.class, true);
@@ -431,6 +436,8 @@ public class Splink extends JFrame
       setTitle(String.format("http://%s:%d/openrdf-sesame/%s (%d)",
         SESAME_HOST.getString(), SESAME_PORT.getInteger(),
         repositoryName, mConnection.size()));
+      
+      setResultAreaMessage(repositoryName + " is ready!", 100);
     }
     catch (RepositoryException e)
     {
@@ -1172,11 +1179,11 @@ public class Splink extends JFrame
     updateEnabled();
   }
 
-  public void setReslutAreaMessage(String message, Font font, Color color)
+  public void setResultAreaMessage(String message, float size)
   {
     JLabel resultComponent = new JLabel(message);
-    resultComponent.setFont(font);
-    resultComponent.setForeground(color);
+    resultComponent.setFont(RESULT_FONT.getFont().deriveFont(size));
+    resultComponent.setForeground(RESULT_MESSAGE_CLR.getColor());
     resultComponent.setVerticalAlignment(JLabel.CENTER);
     resultComponent.setHorizontalAlignment(JLabel.CENTER);
     setResultComponent(resultComponent);
@@ -1247,10 +1254,13 @@ public class Splink extends JFrame
         return "<" + getValue() + ">";
       case LITERAL:
         Matcher m = LITERAL.parse(getValue());
-        return format("\"\"\"%s\"\"\"%s",
-          m.group(1).replaceAll("\"", "\\\\\""), m.group(2) == null
-            ? ""
-            : m.group(2));
+        String base = m.group(1);
+        String type = m.group(2);
+        if (null == type)
+          type = "";
+        base = base.replaceAll("\"", "\\\\\"");
+        String quote = (base.contains("\n") || base.contains("\r")) ? "\"\"\"" : "\"";
+        return format("%s%s%s%s\n", quote, base, quote, type);
       }
 
       return getValue();
@@ -1289,12 +1299,11 @@ public class Splink extends JFrame
   
   private void inspectPrefix(String prefix)
   {
-    String regex = format("regex(str(%%s), str(%s)) ", prefix);
-    
     String query = format(
-      "SELECT * " +
-      "WHERE { ?subject ?predicate ?object " +
-      "FILTER (" + regex + " || " + regex + ")}", "?subject", "?object");
+      "construct {?s ?p ?o}"  +
+      "where { ?s ?p ?o. " +
+      "  filter(regex(str(?s), str(%s)) || regex(str(?o), str(%s)))}",
+      prefix, prefix);
     submitQuery(query, true, true);
   }
 
@@ -1398,8 +1407,6 @@ public class Splink extends JFrame
       public int process(TupleQueryResult result)
         throws QueryEvaluationException
       {
-        out.format("Results: %s", result);
-
         // create the table model
 
         DefaultTableModel tm = new DefaultTableModel()
@@ -1505,8 +1512,7 @@ public class Splink extends JFrame
 
       public boolean process(boolean result)
       {
-        setReslutAreaMessage(format("%b", result).toUpperCase(), RESULT_FONT
-          .getFont().deriveFont(150f), RESULT_FONT_CLR.getColor());
+        setResultAreaMessage(format("%b", result).toUpperCase(), 150);
         return result;
       }
     };
@@ -1555,8 +1561,7 @@ public class Splink extends JFrame
       {
         String message = "Asking...";
         setMessage(message);
-        setReslutAreaMessage(message, RESULT_FONT.getFont().deriveFont(50f),
-          RESULT_FONT_CLR.getColor());
+        setResultAreaMessage(message, 50);
 
         BooleanQuery query =
           mConnection.prepareBooleanQuery(QueryLanguage.SPARQL, queryString);
@@ -1575,8 +1580,7 @@ public class Splink extends JFrame
           ? " (no limit)"
           : " with limit " + actualLimit.get());
         setMessage(message);
-        setReslutAreaMessage(message, RESULT_FONT.getFont().deriveFont(50f),
-          RESULT_FONT_CLR.getColor());
+        setResultAreaMessage(message, 50);
         
         TupleQuery query =
           mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
@@ -1599,13 +1603,12 @@ public class Splink extends JFrame
           ? " (no limit)"
           : " with limit " + actualLimit.get());
         setMessage(message);
-        setReslutAreaMessage(message, RESULT_FONT.getFont().deriveFont(50f),
-          RESULT_FONT_CLR.getColor());
+        setResultAreaMessage(message, 50);
         GraphQuery query =
           mConnection.prepareGraphQuery(QueryLanguage.SPARQL, queryString);
         query.setIncludeInferred(includeInffered);
-        GraphQueryResult result = query.evaluate();
-        int rows = resultProcessor.process(result);
+        int rows = resultProcessor.process(query.evaluate());
+        //exportGraph(query.evaluate());
         setMessage("seconds: %2.2f, cols: %d, rows: %d %s",
           (System.currentTimeMillis() - startTime) / 1000.f, 3, rows,
           rows == actualLimit.get()
@@ -1621,6 +1624,34 @@ public class Splink extends JFrame
     {
       setError(e, "------ query ------\n\n%s\n\n-------------------\n",
         queryString);
+    }
+  }
+
+  private void exportGraph(GraphQueryResult result)
+  {
+    try
+    {
+      StringWriter stringWriter = new StringWriter();
+      RDFWriter rdfWriter = Rio.createWriter(RDFFormat.TURTLE, stringWriter);
+      
+      rdfWriter.startRDF();
+      Map<String, String> nameSpace = result.getNamespaces();
+      for (String prefix: nameSpace.keySet())
+        rdfWriter.handleNamespace(prefix, nameSpace.get(prefix));
+      
+      while (result.hasNext())
+        rdfWriter.handleStatement(result.next());
+      rdfWriter.endRDF();
+      
+      debugMessage(stringWriter.toString());
+    }
+    catch (QueryEvaluationException e)
+    {
+      setError(e);
+    }
+    catch (RDFHandlerException e)
+    {
+      setError(e);
     }
   }
 

@@ -34,12 +34,16 @@ public class TestSplink
         put("file://foo/bar.txt", LONG_URI);
         put("http://www.google.com/foo", LONG_URI);
 
+        
         put("\"hello my name is fred\"", LITERAL);
         put("\"hello my name is fred\"@en", LITERAL);
         put("\"hello my name is fred\"@en_gb", LITERAL);
         put("\"hello my name is fred\"^^xsd:integer", LITERAL);
-        put("\"hello my name is fred\"^^http://www.w3.org/2001/XMLSchema#integer", LITERAL);
-        put("\"hello my name is \"fred\"\"^^http://www.w3.org/2001/XMLSchema#integer", LITERAL);
+        put("\"hello my name is fred\"^^<http://www.w3.org/2001/XMLSchema#integer>", LITERAL);
+        put("\"hello my name is \"fred\"\"^^<http://www.w3.org/2001/XMLSchema#integer>", LITERAL);
+        
+        put("\"1986-02-11T00:00:00-04:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>", LITERAL);
+        put("\"1996-05-14T13:33:12-04:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>", LITERAL);
         put("\"foo\nbar\"", LITERAL);
       }
     };
@@ -60,13 +64,14 @@ public class TestSplink
     {
       if (RESOURCE_EXAMPLES.get(uri) == LITERAL)
       {
-        System.out.println(String.format(uri));
         Matcher m = LITERAL.parse(uri);
-        assertTrue(m.matches());
-        for (int i = 0; i <  m.groupCount(); ++i)
-          out.format("  %d: %s\n", i, m.group(i + 1));
-        
-        out.format("\"\"\"%s\"\"\"%s\n", m.group(1).replaceAll("\"", "\\\\\""), m.group(2) == null ? "" : m.group(2));
+        String base = m.group(1);
+        String type = m.group(2);
+        if (null == type)
+          type = "";
+        base = base.replaceAll("\"", "\\\\\"");
+        String quote = (base.contains("\n") || base.contains("\r")) ? "\"\"\"" : "\"";
+        out.format("%s%s%s%s\n", quote, base, quote, type);
       }
     }
     
