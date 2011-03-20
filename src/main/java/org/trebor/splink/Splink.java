@@ -378,7 +378,6 @@ public class Splink extends JFrame
           BindingSet row = result.next();
           mRepositoryList.put(row.getValue(nameColumn)
             .stringValue(), row.getValue(labelColumn).stringValue());
-          debugMessage("row: %s", mRepositoryList.get(row.getValue(nameColumn).stringValue()));
         }
 
         ButtonGroup radioButtonGroup = new ButtonGroup();
@@ -1092,6 +1091,12 @@ public class Splink extends JFrame
     optionMenu.add(mShowInferredCbmi =
       new JCheckBoxMenuItem(mShowInferred));
     mShowInferredCbmi.setSelected(OPTION_SHOW_INFERRED.getBoolean());
+
+    // window menu
+
+    JMenu windowMenu = new JMenu("Window");
+    menuBar.add(windowMenu);
+    windowMenu.add(mMinimizeWindow);
 
     // create the table popup menu
 
@@ -2012,6 +2017,24 @@ public class Splink extends JFrame
       updateEnabled();
     }
   };
+  
+  private SplinkAction mMinimizeWindow = new SplinkAction("Minimize/Restore", getKeyStroke(VK_M, META_MASK),  "minimize or restore the splink window")
+  {
+    public void actionPerformed(ActionEvent e)    
+    {
+      
+      switch (getState())
+      {
+      case ICONIFIED:
+        setState(NORMAL);
+        break;
+      case NORMAL:
+        setState(ICONIFIED);
+        break;
+      }
+      updateEnabled();
+    }
+  };  
   
   protected void updateEnabled()
   {
