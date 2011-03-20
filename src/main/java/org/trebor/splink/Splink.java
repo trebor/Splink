@@ -85,6 +85,7 @@ import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableColumn;
 import javax.swing.table.TableColumnModel;
 import javax.swing.table.TableModel;
+import javax.swing.table.TableRowSorter;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultEditorKit;
 import javax.swing.text.Document;
@@ -1211,7 +1212,12 @@ public class Splink extends JFrame
   public void setResultComponent(Component c)
   {
     if (c instanceof JTable)
-      adjustTablesColumns((JTable)c);
+    {
+      JTable table = (JTable)c;
+      adjustTablesColumns(table);
+      TableRowSorter<TableModel> sorter = new TableRowSorter<TableModel>(table.getModel());
+      table.setRowSorter(sorter);
+    }
     mResultArea.setViewportView(c);
   }
   
