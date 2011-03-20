@@ -130,6 +130,11 @@ import static java.lang.Math.max;
 @SuppressWarnings("serial")
 public class Splink extends JFrame
 {
+  public static final String SYSTEM_REPO_NAME = "SYSTEM";
+  public static final String RDF_PREFIX = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+  public static final String RDFS_PREFIX = "http://www.w3.org/2000/01/rdf-schema#";
+  public static final String SYS_PREFIX = "http://www.openrdf.org/config/repository#";
+  public static final String SYSTEM_PREFIXES  = format("PREFIX rdf:<%s>\nPREFIX rdfs:<%s>\nPREFIX sys:<%s>\n", RDF_PREFIX, RDFS_PREFIX, SYS_PREFIX);
   public static final String QUERY_REPO_NAME_DESCRIPTION = "SELECT ?name ?label WHERE {?_ sys:repositoryID ?name. ?_ rdfs:label ?label}";
   public static final String DEFAULT_QUERY = "SELECT\n\t*\nWHERE\n{\n\t?s ?p ?o\n}";
   public static final String PROPERTIES_FILE = System.getProperty("user.home") + File.separator + ".splink";
@@ -143,7 +148,6 @@ public class Splink extends JFrame
   public static final String BLANK_NODE_RE = format("_:%s", URI_IDENTIFIER_RE);
   public static final int NO_QUERY_LIMIT = Integer.MIN_VALUE;
   
-
   private int mQueryLimit;
   private UndoManager mCurrentUndoManagaer;
   private Properties mProperties;
@@ -216,7 +220,7 @@ public class Splink extends JFrame
   {
     SESAME_HOST("sesame.host", String.class, "localhost"),
     SESAME_PORT("sesame.port", Integer.class, 8080),
-    SESAME_REPOSITORY("sesame.repository", String.class, "SYSTEM"),
+    SESAME_REPOSITORY("sesame.repository", String.class, SYSTEM_REPO_NAME),
     
     QUERY_RESULT_LIIMT("query.result.limit", Integer.class, 100),
 
@@ -238,7 +242,11 @@ public class Splink extends JFrame
     CONTEXT_FONT_CLR("gui.context.prefix.color", Color.class, Color.DARK_GRAY),
     
     ERROR_FONT("gui.error.font", Font.class, new Font("Courier", Font.BOLD, 15)),
-    ERROR_FONT_CLR("gui.error.color", Color.class, Color.RED.darker().darker()),
+    
+    
+    ERROR_CLR("gui.error.color", Color.class, Color.RED.darker().darker()),
+    WARN_CLR("gui.warn.color", Color.class, new Color(0xFF, 0x49, 0x0)),
+    MESSAGE_CLR("gui.message.color", Color.class, Color.GREEN.darker().darker().darker()),
     
     TABLE_HEADER_FONT("gui.table.header.font", Font.class, new Font("Courier", Font.BOLD, 20)),
     TABLE_HEADER_FOREGROUND_CLR("gui.table.header.foreground", Color.class, new Color(30, 30, 30)),
@@ -344,16 +352,16 @@ public class Splink extends JFrame
     initializeProperities();
     constructUi(getContentPane());
     initializeRepositoryList();
-    initializeRepository(SESAME_REPOSITORY.getString());
+    SESAME_REPOSITORY.set(initializeRepository(SESAME_REPOSITORY.getString()));
   }
 
   private void initializeRepositoryList()
   {
-    initializeRepository("SYSTEM");
+    initializeRepository(SYSTEM_REPO_NAME);
     
     // get repo list
 
-    performQuery(mQueryPrefixString + QUERY_REPO_NAME_DESCRIPTION, 
+    performQuery(SYSTEM_PREFIXES + QUERY_REPO_NAME_DESCRIPTION, 
       false, false, new QueryResultsProcessor()
     {
       public int process(TupleQueryResult result)
@@ -367,10 +375,9 @@ public class Splink extends JFrame
           BindingSet row = result.next();
           mRepositoryList.put(row.getValue(nameColumn)
             .stringValue(), row.getValue(labelColumn).stringValue());
+          debugMessage("row: %s", mRepositoryList.get(row.getValue(nameColumn).stringValue()));
         }
 
-
-        boolean found = false;
         ButtonGroup radioButtonGroup = new ButtonGroup();
         mRepositoryListMenu.removeAll();
         for (final String repositoryName : mRepositoryList.keySet())
@@ -388,20 +395,11 @@ public class Splink extends JFrame
           button.setToolTipText(mRepositoryList.get(repositoryName));
           
           if (SESAME_REPOSITORY.getString().equals(repositoryName))
-          {
             button.setSelected(true);
-            found = true;
-          }
 
           radioButtonGroup.add(button);
           mRepositoryListMenu.add(button);
         }
-
-        // if the repository in the properties is not in the store, default
-        // to one in the store
-
-        if (!found)
-          SESAME_REPOSITORY.set(mRepositoryList.get(0));
 
         return mRepositoryList.size();
       }
@@ -418,31 +416,45 @@ public class Splink extends JFrame
     });
   }
   
-  private void initializeRepository(String repositoryName)
+  private String initializeRepository(String repositoryName)
   {
     try
     {
+      String warning = null;
+      if (mRepositoryList != null &&
+        !mRepositoryList.containsKey(repositoryName))
+      {
+        warning =
+          format("Unknown repository %s, defaulted to %s.", repositoryName,
+            SYSTEM_REPO_NAME);
+        repositoryName = SYSTEM_REPO_NAME;
+      }
+
       mRepository =
         new HTTPRepository(String.format("http://%s:%d/openrdf-sesame",
           SESAME_HOST.getString(), SESAME_PORT.getInteger()), repositoryName);
 
       mRepository.initialize();
       mConnection = mRepository.getConnection();
-      initializePrefixes();
+      initializePrefixes(repositoryName);
       initalizeContext(repositoryName);
-      
+
       // set frame title
-      
+
       setTitle(String.format("http://%s:%d/openrdf-sesame/%s (%d)",
-        SESAME_HOST.getString(), SESAME_PORT.getInteger(),
-        repositoryName, mConnection.size()));
-      
-      setResultAreaMessage(repositoryName + " is ready!", 100);
+        SESAME_HOST.getString(), SESAME_PORT.getInteger(), repositoryName,
+        mConnection.size()));
+
+      setResultAreaMessage(80, repositoryName + " is ready!");
+      if (null != warning) 
+        setWarning(warning);
     }
     catch (RepositoryException e)
     {
       setError(e);
     }
+
+    return repositoryName;
   }
 
   private void initializeProperities()
@@ -466,7 +478,6 @@ public class Splink extends JFrame
         {
           String message =
             format("initializing %s context...", repositoryName);
-          setMessage(message);
           JLabel info = new JLabel(message);
           info.setFont(CONTEXT_FONT.getFont());
           info.setForeground(CONTEXT_FONT_CLR.getColor());
@@ -511,7 +522,6 @@ public class Splink extends JFrame
           }
 
           mContextScroll.setViewportView(mContext);
-          setMessage("initialized context.");
         }
         catch (RepositoryException e)
         {
@@ -521,11 +531,11 @@ public class Splink extends JFrame
     }.start();
   }
 
-  private void initializePrefixes()
+  private void initializePrefixes(String repositoryName)
   {
     try
     {
-      setMessage("initializing namespace...");
+      setMessage("initializing %s namespace...", repositoryName);
 
       // init name-space map and a buffer to build the query prefix string
 
@@ -585,7 +595,7 @@ public class Splink extends JFrame
         adjustTablesColumns(mPrefix);
       }
 
-      setMessage("initialized namespace.");
+      setMessage("initialized %s namespace.", repositoryName);
     }
     catch (Exception e)
     {
@@ -863,7 +873,7 @@ public class Splink extends JFrame
 
     mErrorText = new JTextArea();
     mErrorText.setFont(ERROR_FONT.getFont());
-    mErrorText.setForeground(ERROR_FONT_CLR.getColor());
+    mErrorText.setForeground(ERROR_CLR.getColor());
     mErrorText.setEditable(false);
     mErrorText.getDocument().putProperty(PlainDocument.tabSizeAttribute,
       EDITOR_TAB_SIZE.getInteger());
@@ -1179,9 +1189,9 @@ public class Splink extends JFrame
     updateEnabled();
   }
 
-  public void setResultAreaMessage(String message, float size)
+  public void setResultAreaMessage(float size, String format, Object... args)
   {
-    JLabel resultComponent = new JLabel(message);
+    JLabel resultComponent = new JLabel(format(format, args));
     resultComponent.setFont(RESULT_FONT.getFont().deriveFont(size));
     resultComponent.setForeground(RESULT_MESSAGE_CLR.getColor());
     resultComponent.setVerticalAlignment(JLabel.CENTER);
@@ -1512,7 +1522,7 @@ public class Splink extends JFrame
 
       public boolean process(boolean result)
       {
-        setResultAreaMessage(format("%b", result).toUpperCase(), 150);
+        setResultAreaMessage(150, format("%b", result).toUpperCase());
         return result;
       }
     };
@@ -1561,7 +1571,7 @@ public class Splink extends JFrame
       {
         String message = "Asking...";
         setMessage(message);
-        setResultAreaMessage(message, 50);
+        setResultAreaMessage(50, message);
 
         BooleanQuery query =
           mConnection.prepareBooleanQuery(QueryLanguage.SPARQL, queryString);
@@ -1580,7 +1590,7 @@ public class Splink extends JFrame
           ? " (no limit)"
           : " with limit " + actualLimit.get());
         setMessage(message);
-        setResultAreaMessage(message, 50);
+        setResultAreaMessage(50, message);
         
         TupleQuery query =
           mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
@@ -1603,7 +1613,7 @@ public class Splink extends JFrame
           ? " (no limit)"
           : " with limit " + actualLimit.get());
         setMessage(message);
-        setResultAreaMessage(message, 50);
+        setResultAreaMessage(50, message);
         GraphQuery query =
           mConnection.prepareGraphQuery(QueryLanguage.SPARQL, queryString);
         query.setIncludeInferred(includeInffered);
@@ -1679,17 +1689,17 @@ public class Splink extends JFrame
   {
     mErrorText.setText(format(message, args));
     setResultComponent(mErrorText);
-    setMessage(ERROR_FONT_CLR.getColor(), "Error!");
+    setMessage(ERROR_CLR.getColor(), "Error!");
   }
   
   public void setMessage(String message, Object... args)
   {
-    setMessage(Color.GREEN.darker().darker().darker(), message, args);
+    setMessage(MESSAGE_CLR.getColor(), message, args);
   }
   
   public void setWarning(String message, Object... args)
   {
-    setMessage(Color.YELLOW, message, args);
+    setMessage(WARN_CLR.getColor(), "WARNIG: " + message, args);
   }
   
   public void setMessage(Color color, String message, Object... args)
@@ -1701,7 +1711,7 @@ public class Splink extends JFrame
         fullMessage.replaceAll("<", "&lt;").replaceAll(">", "&gt;")
           .replaceAll("\n", "<br>");
       mStatusBar.setToolTipText("<html>" + toolTip + "</html>");
-      mStatusBar.setText(fullMessage);
+      mStatusBar.setText(fullMessage.isEmpty() ? " " : fullMessage);
       mStatusBar.setForeground(color);
       mStatusBar.repaint();
     }
