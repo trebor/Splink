@@ -1699,7 +1699,7 @@ public class Splink extends JFrame
   
   public void setWarning(String message, Object... args)
   {
-    setMessage(WARN_CLR.getColor(), "WARNIG: " + message, args);
+    setMessage(WARN_CLR.getColor(), "WARNING: " + message, args);
   }
   
   public void setMessage(Color color, String message, Object... args)
