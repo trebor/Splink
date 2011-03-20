@@ -39,8 +39,11 @@ import java.awt.event.MouseListener;
 import java.io.File;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Stack;
 import java.util.Vector;
@@ -380,7 +383,9 @@ public class Splink extends JFrame
 
         ButtonGroup radioButtonGroup = new ButtonGroup();
         mRepositoryListMenu.removeAll();
-        for (final String repositoryName : mRepositoryList.keySet())
+        List<String> keys = new ArrayList<String>(mRepositoryList.keySet());
+        Collections.sort(keys);
+        for (final String repositoryName : keys)
         {
           JRadioButtonMenuItem button =
             new JRadioButtonMenuItem(new AbstractAction(repositoryName)
@@ -592,7 +597,6 @@ public class Splink extends JFrame
         prefixCol.setHeaderRenderer(mTableHeaderRenderer);
         valueCol.setPreferredWidth(PREFIX_COL2_WIDTH.getInteger());
         valueCol.setHeaderRenderer(mTableHeaderRenderer);
-        adjustTablesColumns(mPrefix);
       }
 
       setMessage("initialized %s namespace.", repositoryName);
@@ -1711,7 +1715,7 @@ public class Splink extends JFrame
         fullMessage.replaceAll("<", "&lt;").replaceAll(">", "&gt;")
           .replaceAll("\n", "<br>");
       mStatusBar.setToolTipText("<html>" + toolTip + "</html>");
-      mStatusBar.setText(fullMessage.isEmpty() ? " " : fullMessage);
+      mStatusBar.setText(" " + fullMessage);
       mStatusBar.setForeground(color);
       mStatusBar.repaint();
     }
