@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.trebor</groupId>
   <artifactId>splink</artifactId>
-  <version>0.9-alpha</version>
+  <version>0.10-alpha</version>
   <name>Splink</name>
   <url>http://maven.apache.org</url>
 
@@ -59,12 +59,12 @@
       <id>java.net</id>
       <name>java.net Maven Repository</name>
       <url>https://maven-repository.dev.java.net/nonav/repository</url>
-      <layout>legacy</layout>
+      <layout>default</layout>
     </repository>
   </repositories>
 
   <properties>
-    <packageName>${name}-${version}</packageName>
+    <packageName>${project.name}-${project.version}</packageName>
   </properties>
 
   <dependencies>
