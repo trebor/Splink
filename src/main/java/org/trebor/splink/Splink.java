@@ -1936,6 +1936,7 @@ public class Splink extends JFrame
   {
     mErrorText.setText(format(message, args));
     setResultComponent(mErrorText);
+    out.format(message, args);
     setMessage(ERROR_CLR.getColor(), "Error!");
   }
   
