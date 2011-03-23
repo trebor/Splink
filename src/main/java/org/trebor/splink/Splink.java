@@ -33,12 +33,16 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
 import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.io.Writer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -49,20 +53,31 @@ import java.util.Stack;
 import java.util.Vector;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import javax.swing.AbstractAction;
 import javax.swing.ActionMap;
 import javax.swing.ButtonGroup;
+import javax.swing.GroupLayout;
+import javax.swing.ImageIcon;
 import javax.swing.InputMap;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JCheckBoxMenuItem;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JDialog;
 import javax.swing.JEditorPane;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollPane;
@@ -71,6 +86,7 @@ import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.KeyStroke;
+import javax.swing.SpringLayout;
 import javax.swing.SwingConstants;
 import javax.swing.ToolTipManager;
 import javax.swing.border.LineBorder;
@@ -79,6 +95,7 @@ import javax.swing.event.CaretListener;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 import javax.swing.event.UndoableEditEvent;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellRenderer;
@@ -125,6 +142,7 @@ import org.openrdf.rio.Rio;
 import static org.openrdf.query.QueryLanguage.*;
 import static org.trebor.splink.Splink.Property.*;
 import static org.trebor.splink.Splink.ResourceType.*;
+import static javax.swing.GroupLayout.Alignment.*;
 import static javax.swing.KeyStroke.getKeyStroke;
 import static java.awt.event.KeyEvent.*;
 import static java.lang.String.format;
@@ -140,6 +158,7 @@ public class Splink extends JFrame
   public static final String SYS_PREFIX = "http://www.openrdf.org/config/repository#";
   public static final String SYSTEM_PREFIXES  = format("PREFIX rdf:<%s>\nPREFIX rdfs:<%s>\nPREFIX sys:<%s>\n", RDF_PREFIX, RDFS_PREFIX, SYS_PREFIX);
   public static final String QUERY_REPO_NAME_DESCRIPTION = "SELECT ?name ?label WHERE {?_ sys:repositoryID ?name. ?_ rdfs:label ?label}";
+  public static final String QUERY_FOR_EXPORT = "CONSTRUCT {?s ?p ?o} WHERE {?s ?p ?o}";
   public static final String DEFAULT_QUERY = "SELECT\n\t*\nWHERE\n{\n\t?s ?p ?o\n}";
   public static final String PROPERTIES_FILE = System.getProperty("user.home") + File.separator + ".splink";
   public static final String QUERY_NAME_KEY_BASE = "query.name.";
@@ -151,6 +170,7 @@ public class Splink extends JFrame
   public static final String LITERAL_RE = format("\"(\\p{ASCII}*)\"((@|\\^\\^)(%s|%s|<%s>))?", URI_IDENTIFIER_RE, SHORT_URI_RE, LONG_URI_RE);
   public static final String BLANK_NODE_RE = format("_:%s", URI_IDENTIFIER_RE);
   public static final int NO_QUERY_LIMIT = Integer.MIN_VALUE;
+  public static final int QUERY_CANCELED = Integer.MIN_VALUE + 1;
   
   private int mQueryLimit;
   private UndoManager mCurrentUndoManagaer;
@@ -228,6 +248,11 @@ public class Splink extends JFrame
     
     QUERY_RESULT_LIIMT("query.result.limit", Integer.class, 100),
 
+    EXPORT_DIRECTORY("file.export.directory", String.class, System.getProperty("user.home")),
+    EXPORT_TYPE("file.export.type", String.class, RDFFormat.TURTLE.getName()),
+
+    MASTER_FONT("gui.master.font", Font.class, new Font("Courier", Font.BOLD, 18)),
+    
     EDITOR_SIZE("gui.editor.size", Dimension.class, new Dimension(300, 250)), 
     EDITOR_FONT("gui.editor.font", Font.class, new Font("Courier", Font.BOLD, 18)),
     EDITOR_FONT_CLR("gui.editor.color", Color.class, Color.DARK_GRAY),
@@ -246,8 +271,6 @@ public class Splink extends JFrame
     CONTEXT_FONT_CLR("gui.context.prefix.color", Color.class, Color.DARK_GRAY),
     
     ERROR_FONT("gui.error.font", Font.class, new Font("Courier", Font.BOLD, 15)),
-    
-    
     ERROR_CLR("gui.error.color", Color.class, Color.RED.darker().darker()),
     WARN_CLR("gui.warn.color", Color.class, new Color(0xFF, 0x49, 0x0)),
     MESSAGE_CLR("gui.message.color", Color.class, Color.GREEN.darker().darker().darker()),
@@ -418,7 +441,7 @@ public class Splink extends JFrame
       {
         throw new UnsupportedOperationException();
       }
-    });
+    }, null);
   }
   
   private String initializeRepository(String repositoryName)
@@ -866,6 +889,10 @@ public class Splink extends JFrame
     mResult.setSelectionForeground(RESULT_FONT_CLR.getColor());
     mResult.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
     
+//  table.getSelectionModel().setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
+//  table.setSelectionMode(ListSelectionModel.SINGLE_INTERVAL_SELECTION);
+//  table.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
+    
     // look for popup menu mouse events
     
     mResult.addMouseListener(new PopupListener(mResult));
@@ -1029,13 +1056,13 @@ public class Splink extends JFrame
     JMenu fileMenu = new JMenu("File");
     menuBar.add(fileMenu);
     fileMenu.add(mSave);
+    fileMenu.add(mExportRepo);
 
     // edit menu
 
     JMenu editMenu = new JMenu("Edit");
     menuBar.add(editMenu);
     editMenu.add(mCopyQuery);
-    editMenu.addSeparator();
 
     // store menu
 
@@ -1403,7 +1430,7 @@ public class Splink extends JFrame
         mPreviousQuery.setEnabled(false);
 
         performQuery(fullQuery, mShowInferredCbmi.isSelected(), true,
-          mDefaultResultsProcessor);
+          mDefaultResultsProcessor, null);
 
         mSubmiteQuery.setEnabled(submitEnabled);
         mPreviousQuery.setEnabled(previousEnabled);
@@ -1417,13 +1444,34 @@ public class Splink extends JFrame
     return metrics.stringWidth(" " + string);
   }
 
-  public interface QueryResultsProcessor
+  public static interface QueryResultsProcessor
   {
     int process(TupleQueryResult result) throws QueryEvaluationException;
 
     int process(GraphQueryResult result) throws QueryEvaluationException;
     
     boolean process(boolean result);
+  }
+
+  public static class QueryResultsAdatper implements QueryResultsProcessor
+  {
+    public int process(TupleQueryResult result)
+      throws QueryEvaluationException
+    {
+      throw new UnsupportedOperationException();
+    }
+
+    public int process(GraphQueryResult result)
+      throws QueryEvaluationException
+    {
+      throw new UnsupportedOperationException();
+    }
+
+    public boolean process(boolean result)
+    {
+      throw new UnsupportedOperationException();
+    }
+    
   }
   
   private QueryResultsProcessor mDefaultResultsProcessor =
@@ -1543,7 +1591,8 @@ public class Splink extends JFrame
     };
   
   public void performQuery(String queryString, boolean includeInffered,
-    boolean limitResults, QueryResultsProcessor resultProcessor)
+    boolean limitResults, QueryResultsProcessor resultProcessor, 
+    AtomicReference<Boolean> queryHalt)
   {
     try
     {
@@ -1584,7 +1633,7 @@ public class Splink extends JFrame
 
       if (parsedQuery instanceof ParsedBooleanQuery)
       {
-        String message = "Asking...";
+        String message = "asking...";
         setMessage(message);
         setResultAreaMessage(50, message);
 
@@ -1601,7 +1650,7 @@ public class Splink extends JFrame
 
       else if (parsedQuery instanceof ParsedTupleQuery)
       {
-        String message = format("Querying%s...", actualLimit.get() == NO_QUERY_LIMIT
+        String message = format("querying%s...", actualLimit.get() == NO_QUERY_LIMIT
           ? " (no limit)"
           : " with limit " + actualLimit.get());
         setMessage(message);
@@ -1613,8 +1662,9 @@ public class Splink extends JFrame
         TupleQueryResult result = query.evaluate();
         int rows = resultProcessor.process(result);
         int columns = result.getBindingNames().size();
-        setMessage("seconds: %2.2f, cols: %d, rows: %d%s",
-          (System.currentTimeMillis() - startTime) / 1000.f, columns, rows,
+        setMessage("seconds: %2.2f, cols: %d, rows: %s%s",
+          (System.currentTimeMillis() - startTime) / 1000.f, columns,
+          (rows == QUERY_CANCELED ? "[canceled]": "" + rows),
           rows == actualLimit.get()
             ? " (limited)"
             : "");
@@ -1624,7 +1674,7 @@ public class Splink extends JFrame
 
       else if (parsedQuery instanceof ParsedGraphQuery)
       {
-        String message = format("Describing%s...", actualLimit.get() == NO_QUERY_LIMIT
+        String message = format("describing%s...", actualLimit.get() == NO_QUERY_LIMIT
           ? " (no limit)"
           : " with limit " + actualLimit.get());
         setMessage(message);
@@ -1633,9 +1683,9 @@ public class Splink extends JFrame
           mConnection.prepareGraphQuery(QueryLanguage.SPARQL, queryString);
         query.setIncludeInferred(includeInffered);
         int rows = resultProcessor.process(query.evaluate());
-        //exportGraph(query.evaluate());
-        setMessage("seconds: %2.2f, cols: %d, rows: %d %s",
-          (System.currentTimeMillis() - startTime) / 1000.f, 3, rows,
+        setMessage("seconds: %2.2f, cols: %d, rows: %s%s",
+          (System.currentTimeMillis() - startTime) / 1000.f, 3, 
+          (rows == QUERY_CANCELED ? "[canceled]": "" + rows),
           rows == actualLimit.get()
             ? " (limited)"
             : "");
@@ -1652,23 +1702,203 @@ public class Splink extends JFrame
     }
   }
 
-  private void exportGraph(GraphQueryResult result)
+  private void exportRepository(final RDFFormat format, final File file,
+    boolean includeInferred, final AtomicReference<Boolean> exportHalt)
   {
+    QueryResultsProcessor exportQrp = new QueryResultsAdatper()
+    {
+      public int process(GraphQueryResult result)
+        throws QueryEvaluationException
+      {
+        int count = 0;
+        try
+        {
+          setResultAreaMessage(50, "writing %s...", file.getName());
+          FileWriter writer = new FileWriter(file);
+          count = writeGraph(format, result, writer, exportHalt);
+          setResultAreaMessage(50, count == QUERY_CANCELED ? "export canceled" : "exported %d triples", count);
+        }
+        catch (IOException e)
+        {
+          setError(e);
+        }
+        
+        return count;
+      }
+    };
+
+    performQuery(mQueryPrefixString + QUERY_FOR_EXPORT, includeInferred, false, exportQrp, exportHalt);
+  }
+  
+  private void showRepositoryDialog()
+  {
+    final Map<String, RDFFormat> formatMap = new HashMap<String, RDFFormat>();
+    for (RDFFormat format : RDFFormat.values())
+      formatMap.put(format.getName(), format);
+    
+    final JLabel throbber = new JLabel(new ImageIcon(getClass().getResource("/images/throbber.gif")));
+    final JDialog dialog = new JDialog(this, "Export Repository", true);
+    final JLabel repoName = new JLabel(SESAME_REPOSITORY.getString());
+    final JButton export = new JButton("Export");
+    final JButton cancel = new JButton("Cancel");
+    final JLabel formatLbl = new JLabel("Format", SwingConstants.RIGHT);
+    final JLabel inferredLbl = new JLabel("Inferred", SwingConstants.RIGHT);
+    final JComboBox formats = new JComboBox(new Vector<String>(formatMap.keySet()));
+    final JCheckBox inferred = new JCheckBox();
+    
+    formats.setSelectedItem(EXPORT_TYPE.getString());
+    repoName.setFont(MASTER_FONT.getFont().deriveFont(20f));
+    repoName.setForeground(Color.DARK_GRAY);
+    throbber.setVisible(false);
+
+    ActionListener listener = new ActionListener()
+    {
+      Thread exportThread = null;
+      AtomicReference<Boolean> exportThreadHalt = new AtomicReference<Boolean>(false);
+      
+      public void actionPerformed(ActionEvent e)
+      {
+        if (e.getSource() == formats)
+        {
+          EXPORT_TYPE.set(formats.getSelectedItem());
+        }
+        if (e.getSource() == export)
+        {
+          final RDFFormat format = formatMap.get(formats.getSelectedItem());
+
+          JFileChooser chooser = new JFileChooser(EXPORT_DIRECTORY.getString());
+          chooser.setSelectedFile(new File(EXPORT_DIRECTORY.getString() + File.separator + 
+            SESAME_REPOSITORY.getString() + "." + 
+            format.getDefaultFileExtension()));
+          chooser.setFileFilter(new FileNameExtensionFilter(
+            format.getName() + " " + format.getFileExtensions(),
+            format.getFileExtensions().toArray(new String[]{})));
+          chooser.setMultiSelectionEnabled(false);
+          
+          if (chooser.showSaveDialog(dialog) == JFileChooser.APPROVE_OPTION)
+          {
+            final File file = chooser.getSelectedFile();
+            EXPORT_DIRECTORY.set(file.getParent());
+            if (file.exists())
+            {
+              Object[] options = {"Overwrite", "Cancel"};
+              int n = JOptionPane.showOptionDialog(dialog,
+                file.getName() + " exists.  Overwrite it?",
+                "Overwrite " + file.getName(),
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                options,
+                options[1]);
+              
+              if (n != 0)
+                return;
+            }
+            
+            throbber.setVisible(true);
+            export.setEnabled(false);
+            formats.setEnabled(false);
+            
+            dialog.pack();
+            exportThread = new Thread()
+            {
+              public void run()
+              {
+                exportRepository(format, file, inferred.isSelected(), exportThreadHalt);
+                dialog.setVisible(false);
+              }
+            };
+            exportThread.start();
+          }
+        }
+        else if (e.getSource() == cancel)
+        {
+          if (null != exportThread)
+            exportThreadHalt.set(true);
+          
+          dialog.setVisible(false);
+        }
+      }
+    };
+
+    export.addActionListener(listener);
+    cancel.addActionListener(listener);
+    formats.addActionListener(listener);
+    
+    JPanel options = new JPanel();
+    options.setBackground(Color.WHITE);
+    options.setLayout(new SpringLayout());
+    options.add(formatLbl);
+    options.add(formats);
+    options.add(inferredLbl);
+    options.add(inferred);
+    SpringUtilities.makeCompactGrid(options, 2, 2, 0, 0, 0, 0);
+
+    GroupLayout layout = new GroupLayout(dialog.getContentPane());
+    layout.setAutoCreateGaps(true);
+    layout.setAutoCreateContainerGaps(true);
+
+    dialog.getContentPane().setLayout(layout);
+    layout.setHorizontalGroup(layout.createParallelGroup(TRAILING)
+      .addGroup(layout.createParallelGroup(CENTER)
+        .addComponent(repoName)
+        .addComponent(options))
+        .addGroup(layout.createSequentialGroup()
+          .addComponent(throbber)
+          .addGap(30)
+          .addComponent(export)
+          .addComponent(cancel))
+    );
+    
+    layout.setVerticalGroup(layout.createSequentialGroup()
+      .addComponent(repoName)
+      .addComponent(options)
+      .addGroup(layout.createParallelGroup()
+        .addComponent(throbber)
+        .addComponent(export)
+        .addComponent(cancel))
+    );
+
+    dialog.getRootPane().registerKeyboardAction(new ActionListener()
+    {
+      public void actionPerformed(ActionEvent e)
+      {
+        dialog.setVisible(false);
+      }
+    }, getKeyStroke(VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
+    
+    dialog.pack();
+    dialog.setLocationRelativeTo(this);
+    dialog.setResizable(false);
+    export.requestFocusInWindow();
+    dialog.getContentPane().setBackground(Color.white);
+    dialog.setVisible(true);
+  }
+  
+  private int writeGraph(RDFFormat format, GraphQueryResult result, Writer writer, AtomicReference<Boolean> exportHalt)
+  {
+    int count = 0;
+    
     try
     {
-      StringWriter stringWriter = new StringWriter();
-      RDFWriter rdfWriter = Rio.createWriter(RDFFormat.TURTLE, stringWriter);
-      
+      RDFWriter rdfWriter = Rio.createWriter(format, writer);
       rdfWriter.startRDF();
+
       Map<String, String> nameSpace = result.getNamespaces();
       for (String prefix: nameSpace.keySet())
+      {
         rdfWriter.handleNamespace(prefix, nameSpace.get(prefix));
+        if (exportHalt.get())
+          return QUERY_CANCELED;
+      }
       
       while (result.hasNext())
+      {
         rdfWriter.handleStatement(result.next());
-      rdfWriter.endRDF();
+        ++count;
+      }
       
-      debugMessage(stringWriter.toString());
+      rdfWriter.endRDF();
     }
     catch (QueryEvaluationException e)
     {
@@ -1678,6 +1908,8 @@ public class Splink extends JFrame
     {
       setError(e);
     }
+    
+    return count;
   }
 
   public void debugMessage(String message, Object... args)
@@ -1739,7 +1971,7 @@ public class Splink extends JFrame
    * class from which to subclass Game actions.
    */
 
-  public abstract class SplinkAction extends AbstractAction
+  public static class SplinkAction extends AbstractAction
   {
     /**
      * Create a SplinkAction with a given name, shortcut key and description.
@@ -1762,7 +1994,10 @@ public class Splink extends JFrame
      * @param e action event
      */
 
-    abstract public void actionPerformed(ActionEvent e);
+    public void actionPerformed(ActionEvent e)
+    {
+      // noop
+    }
     
     public String getDescription()
     {
@@ -1863,7 +2098,7 @@ public class Splink extends JFrame
     }
   };
 
-  private SplinkAction mNewQueryTab = new SplinkAction("New Query", getKeyStroke(VK_T, META_MASK),  "create a new query editor")
+  private SplinkAction mNewQueryTab = new SplinkAction("New Query Editor", getKeyStroke(VK_T, META_MASK),  "create a new query editor")
   {
     public void actionPerformed(ActionEvent e)
     {
@@ -1969,15 +2204,25 @@ public class Splink extends JFrame
 
     
   private SplinkAction mQueryRemoveTab =
-    new SplinkAction("Remove Current Query", null,
-      "delete current query editor (not undoable!)")
+    new SplinkAction("Delete Query Editor", getKeyStroke(VK_W, META_MASK),
+      "delete current query editor")
     {
       public void actionPerformed(ActionEvent e)
       {
-        mEditorTab.remove(mEditorTab.getSelectedIndex());
-        if (mEditorTab.getTabCount() == 0)
-          addNewEditor();
-        updateEnabled();
+        Object[] options = {"Delete", "Cancel"};
+        int n = JOptionPane.showOptionDialog(Splink.this,
+          "Delete current query editor (this in not undoable)?",
+          "Delete Query Editor",
+          JOptionPane.YES_NO_OPTION,
+          JOptionPane.WARNING_MESSAGE,
+          null,
+          options,
+          options[1]);
+        if (n == 0)
+        {
+          removeCurrentEditor();
+          updateEnabled();
+        }
       }
     };
 
@@ -2042,6 +2287,14 @@ public class Splink extends JFrame
     }
   };  
   
+  private SplinkAction mExportRepo = new SplinkAction("Export Repository", getKeyStroke(VK_E, META_MASK),  "export the contents of a repository to the local disk")
+  {
+    public void actionPerformed(ActionEvent e)    
+    {
+      showRepositoryDialog();
+    }
+  };  
+
   protected void updateEnabled()
   {
     if (null != mEditorTab)
@@ -2067,6 +2320,13 @@ public class Splink extends JFrame
   {
     addEditor(NameGenerator.getName(2, NameGenerator.INITIAL_CASE_SPACE), DEFAULT_QUERY);
   }
+
+  private void removeCurrentEditor()
+  {
+    mEditorTab.remove(mEditorTab.getSelectedIndex());
+    if (mEditorTab.getTabCount() == 0)
+      addNewEditor();
+  }  
 
   private void shutdownHook()
   {
