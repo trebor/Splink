@@ -43,6 +43,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.io.Writer;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -85,6 +86,7 @@ import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
+import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.SpringLayout;
 import javax.swing.SwingConstants;
@@ -141,9 +143,11 @@ import org.openrdf.rio.Rio;
 
 import static org.openrdf.query.QueryLanguage.*;
 import static org.trebor.splink.Splink.Property.*;
+import static org.trebor.splink.Splink.AutoConnectBehavior.*;
 import static org.trebor.splink.Splink.ResourceType.*;
 import static javax.swing.GroupLayout.Alignment.*;
 import static javax.swing.KeyStroke.getKeyStroke;
+import static java.awt.event.InputEvent.CTRL_MASK;
 import static java.awt.event.KeyEvent.*;
 import static java.lang.String.format;
 import static java.lang.System.out;
@@ -171,6 +175,7 @@ public class Splink extends JFrame
   public static final String BLANK_NODE_RE = format("_:%s", URI_IDENTIFIER_RE);
   public static final int NO_QUERY_LIMIT = Integer.MIN_VALUE;
   public static final int QUERY_CANCELED = Integer.MIN_VALUE + 1;
+  protected static final String HOST_PORT_URL_FORMAT = "http://%s:%d/openrdf-sesame";
   
   private int mQueryLimit;
   private UndoManager mCurrentUndoManagaer;
@@ -245,7 +250,8 @@ public class Splink extends JFrame
     SESAME_HOST("sesame.host", String.class, "localhost"),
     SESAME_PORT("sesame.port", Integer.class, 8080),
     SESAME_REPOSITORY("sesame.repository", String.class, SYSTEM_REPO_NAME),
-    
+    AUTO_CONNECT("network.autoconnect", Boolean.class, false),
+
     QUERY_RESULT_LIIMT("query.result.limit", Integer.class, 100),
 
     EXPORT_DIRECTORY("file.export.directory", String.class, System.getProperty("user.home")),
@@ -378,13 +384,59 @@ public class Splink extends JFrame
   {
     initializeProperities();
     constructUi(getContentPane());
-    initializeRepositoryList();
-    SESAME_REPOSITORY.set(initializeRepository(SESAME_REPOSITORY.getString()));
+    initializeRepository(CONNECT_AS_DIRECTED);
   }
 
-  private void initializeRepositoryList()
+  private void initializeRepository(AutoConnectBehavior autoConnectBehavior)
   {
-    initializeRepository(SYSTEM_REPO_NAME);
+    if (initializeRepositoryList(autoConnectBehavior))
+      initializeWorkingRepository(SESAME_REPOSITORY.getString(), FORCE_AUTO_CONNECT, true);
+  }
+  
+  private void connect(String host, int port, String repositoryName,
+    boolean storeResultOnConnect)
+  {
+    clearPrefixes();
+    clearContexts();
+    mRepository = null;
+    mConnection = null;
+    String url = format(HOST_PORT_URL_FORMAT, host, port);
+
+    try
+    {
+      HTTPRepository repository =
+        new HTTPRepository(url, repositoryName);
+
+      repository.initialize();
+      RepositoryConnection connection = repository.getConnection();
+      connection.size();
+      if (storeResultOnConnect)
+      {
+        SESAME_HOST.set(host);
+        SESAME_PORT.set(port);
+        SESAME_REPOSITORY.set(repositoryName);
+      }
+      mRepository = repository;
+      mConnection = connection;
+    }
+    catch (Exception e)
+    {
+      if (null != e.getCause())
+      {
+        if (e.getCause() instanceof UnknownHostException)
+          setBigError(25, "Unknown host %s connecting to %s", host, url);
+        else
+          setBigError(25, "%s to %s", e.getCause().getMessage(), url);
+      }
+      else
+        setError(e, "Connecting to %s", url);
+    }
+  }
+
+  private boolean initializeRepositoryList(AutoConnectBehavior autoConnectBehavior)
+  {
+    if (!initializeWorkingRepository(SYSTEM_REPO_NAME, autoConnectBehavior, false))
+      return false;
     
     // get repo list
 
@@ -415,8 +467,7 @@ public class Splink extends JFrame
             {
               public void actionPerformed(ActionEvent arg0)
               {
-                initializeRepository(repositoryName);
-                SESAME_REPOSITORY.set(repositoryName);
+                initializeWorkingRepository(repositoryName, FORCE_AUTO_CONNECT, true);
               }
             });
 
@@ -442,9 +493,12 @@ public class Splink extends JFrame
         throw new UnsupportedOperationException();
       }
     }, null);
+    
+    return true;
   }
   
-  private String initializeRepository(String repositoryName)
+  private boolean initializeWorkingRepository(String repositoryName, 
+    AutoConnectBehavior autoConnectBehavior, boolean storeResultOnConnect)
   {
     try
     {
@@ -457,21 +511,22 @@ public class Splink extends JFrame
             SYSTEM_REPO_NAME);
         repositoryName = SYSTEM_REPO_NAME;
       }
+      
+      peformConnection(SESAME_HOST.getString(), SESAME_PORT.getInteger(), repositoryName,
+        autoConnectBehavior, storeResultOnConnect);
 
-      mRepository =
-        new HTTPRepository(String.format("http://%s:%d/openrdf-sesame",
-          SESAME_HOST.getString(), SESAME_PORT.getInteger()), repositoryName);
+      String url = format(HOST_PORT_URL_FORMAT + "/%s", SESAME_HOST.getString(), 
+        SESAME_PORT.getInteger(), repositoryName);
+      
+      if (!isConnected())
+        return false;
 
-      mRepository.initialize();
-      mConnection = mRepository.getConnection();
       initializePrefixes(repositoryName);
       initalizeContext(repositoryName);
 
       // set frame title
 
-      setTitle(String.format("http://%s:%d/openrdf-sesame/%s (%d)",
-        SESAME_HOST.getString(), SESAME_PORT.getInteger(), repositoryName,
-        mConnection.size()));
+      setTitle(format("%s (%d)", url, mConnection.size()));
 
       setResultAreaMessage(80, repositoryName + " is ready!");
       if (null != warning) 
@@ -482,7 +537,19 @@ public class Splink extends JFrame
       setError(e);
     }
 
-    return repositoryName;
+    return true;
+  }
+
+  private boolean isConnected()
+  {
+    try
+    {
+      return null != mRepository && null != mConnection && mConnection.isOpen();
+    }
+    catch (RepositoryException e)
+    {
+    }
+    return false;
   }
 
   private void initializeProperities()
@@ -630,6 +697,27 @@ public class Splink extends JFrame
     }
   }
 
+  public void clearPrefixes()
+  {
+    if (null != mPrefix)
+    {
+      mNameSpaceMap = new HashMap<String, String>();
+      mPrefixRegex = new HashMap<String, Pattern>();
+      mPrefixTable = new DefaultTableModel();
+      mPrefix.setModel(mPrefixTable);
+    }
+  }
+
+  public void clearContexts()
+  {
+    if (null != mContext)
+    {
+      mContextTable = new DefaultTableModel();
+      mContext.setModel(mContextTable);
+    }
+  }
+  
+  
   public String shortUri(String longUri)
   {
     if (LONG_URI.isMatch(longUri))
@@ -1068,7 +1156,8 @@ public class Splink extends JFrame
 
     JMenu storeMenu = new JMenu("Store");
     menuBar.add(storeMenu);
-    storeMenu.add(mReloadNameSpace);
+    storeMenu.add(mReinitializeConnection);
+    storeMenu.add(mConnect);
     mRepositoryListMenu = new JMenu("Repositories");
     storeMenu.add(mRepositoryListMenu);
 
@@ -1076,7 +1165,7 @@ public class Splink extends JFrame
 
     JMenu queryMenu = new JMenu("Query");
     menuBar.add(queryMenu);
-    queryMenu.add(mSubmiteQuery);
+    queryMenu.add(mPerformQuery);
     queryMenu.add(mPreviousQuery);
     queryMenu.addSeparator();
     queryMenu.add(mNewQueryTab);
@@ -1228,9 +1317,14 @@ public class Splink extends JFrame
 
   public void setResultAreaMessage(float size, String format, Object... args)
   {
+    setResultAreaMessage(RESULT_MESSAGE_CLR.getColor(), size, format, args);
+  }
+  
+  public void setResultAreaMessage(Color color, float size, String format, Object... args)
+  {
     JLabel resultComponent = new JLabel(format(format, args));
     resultComponent.setFont(RESULT_FONT.getFont().deriveFont(size));
-    resultComponent.setForeground(RESULT_MESSAGE_CLR.getColor());
+    resultComponent.setForeground(color);
     resultComponent.setVerticalAlignment(JLabel.CENTER);
     resultComponent.setHorizontalAlignment(JLabel.CENTER);
     setResultComponent(resultComponent);
@@ -1412,6 +1506,12 @@ public class Splink extends JFrame
   private void submitQuery(final String query, final boolean appendPrefix,
     boolean pushQuery)
   {
+    if (!isConnected())
+    {
+      setBigError(50, "not connected");
+      return;
+    }
+    
     final String fullQuery = appendPrefix
       ? mQueryPrefixString + query
       : query;
@@ -1423,16 +1523,16 @@ public class Splink extends JFrame
     {
       public void run()
       {
-        boolean submitEnabled = mSubmiteQuery.isEnabled();
+        boolean submitEnabled = mPerformQuery.isEnabled();
         boolean previousEnabled = mPreviousQuery.isEnabled();
 
-        mSubmiteQuery.setEnabled(false);
+        mPerformQuery.setEnabled(false);
         mPreviousQuery.setEnabled(false);
 
         performQuery(fullQuery, mShowInferredCbmi.isSelected(), true,
           mDefaultResultsProcessor, null);
 
-        mSubmiteQuery.setEnabled(submitEnabled);
+        mPerformQuery.setEnabled(submitEnabled);
         mPreviousQuery.setEnabled(previousEnabled);
       }
     }.start();
@@ -1730,7 +1830,7 @@ public class Splink extends JFrame
     performQuery(mQueryPrefixString + QUERY_FOR_EXPORT, includeInferred, false, exportQrp, exportHalt);
   }
   
-  private void showRepositoryDialog()
+  private void showRepositoryExportDialog()
   {
     final Map<String, RDFFormat> formatMap = new HashMap<String, RDFFormat>();
     for (RDFFormat format : RDFFormat.values())
@@ -1762,7 +1862,7 @@ public class Splink extends JFrame
         {
           EXPORT_TYPE.set(formats.getSelectedItem());
         }
-        if (e.getSource() == export)
+        else if (e.getSource() == export)
         {
           final RDFFormat format = formatMap.get(formats.getSelectedItem());
 
@@ -1814,7 +1914,10 @@ public class Splink extends JFrame
         else if (e.getSource() == cancel)
         {
           if (null != exportThread)
+          {
             exportThreadHalt.set(true);
+            exportThread = null;
+          }
           
           dialog.setVisible(false);
         }
@@ -1875,6 +1978,176 @@ public class Splink extends JFrame
     dialog.setVisible(true);
   }
   
+  enum AutoConnectBehavior
+  {
+    FORCE_AUTO_CONNECT {
+      boolean autoConnect(boolean autoConnectOption)
+      {
+        return true;
+      }
+    },
+    INHIBIT_AUTO_CONNECT {
+      boolean autoConnect(boolean autoConnectOption)
+      {
+        return false;
+      }
+    },
+    CONNECT_AS_DIRECTED {
+      boolean autoConnect(boolean autoConnectOption)
+      {
+        return autoConnectOption;
+      }
+    };
+    
+    abstract boolean autoConnect(boolean autoConnectOption);
+  }
+  
+  private void peformConnection(String host, int port, final String repository, 
+    final AutoConnectBehavior autoConnectBehavior, final boolean storeResultOnConnect)
+  {
+    boolean autoConnect = autoConnectBehavior.autoConnect(AUTO_CONNECT.getBoolean());
+
+    // blank out namespace and prefix sections
+    
+    if (autoConnect)
+      connect(host, port, repository, storeResultOnConnect);
+
+    if (!autoConnect || (autoConnect && !isConnected()))
+      showConnectionDialog(host, port, repository, storeResultOnConnect);
+  }
+  
+  private void showConnectionDialog(String host, int port, final String repository, 
+    final boolean storeResultOnConnect)
+  {
+    final JLabel throbber = new JLabel(new ImageIcon(getClass().getResource("/images/throbber.gif")));
+    final JLabel blank = new JLabel(new ImageIcon(getClass().getResource("/images/blank.png")));
+    final JDialog dialog = new JDialog(this, "Connect", true);
+    final JButton connect = new JButton("Connect");
+    final JButton cancel = new JButton("Cancel");
+    final JLabel hostLbl = new JLabel("Host", SwingConstants.RIGHT);
+    final JLabel portLbl = new JLabel("Port", SwingConstants.RIGHT);
+    final JLabel autoConnectLbl = new JLabel("Auto Connect", SwingConstants.RIGHT);
+    final JTextField hostFld = new JTextField(host);
+    final JTextField portFld = new JTextField("" + port);
+    final JCheckBox autoConnect = new JCheckBox();
+    
+    throbber.setVisible(false);
+    blank.setVisible(true);
+    autoConnect.setSelected(AUTO_CONNECT.getBoolean());
+    
+    class ConnectThread extends Thread
+    {
+      public void run()
+      {
+        String host = hostFld.getText();
+        int port = Integer.valueOf(portFld.getText());
+        
+        connect(host, port, repository, storeResultOnConnect);
+        if (isConnected())
+        {
+          dialog.setVisible(false);
+        }
+        else
+        {
+          throbber.setVisible(false);
+          blank.setVisible(true);
+          connect.setEnabled(true);
+          dialog.pack();
+        }
+      }
+    }
+    
+    ActionListener listener = new ActionListener()
+    {
+      public void actionPerformed(ActionEvent e)
+      {
+        Object source = e.getSource();
+        
+        if (source == autoConnect)
+        {
+          AUTO_CONNECT.set(autoConnect.isSelected());
+        }
+        else if (source == connect)
+        {
+          throbber.setVisible(true);
+          blank.setVisible(false);
+          connect.setEnabled(false);
+          dialog.pack();
+          
+          (new ConnectThread()).start();
+        }
+        else if (source == cancel)
+        {
+          dialog.setVisible(false);
+        }
+      }
+    };
+  
+    autoConnect.addActionListener(listener);
+    connect.addActionListener(listener);
+    cancel.addActionListener(listener);
+    
+    JPanel options = new JPanel();
+    options.setBackground(Color.WHITE);
+    options.setLayout(new SpringLayout());
+    options.add(hostLbl);
+    options.add(hostFld);
+    options.add(portLbl);
+    options.add(portFld);
+    options.add(autoConnectLbl);
+    options.add(autoConnect);
+    SpringUtilities.makeCompactGrid(options, 3, 2, 0, 0, 0, 0);
+  
+    GroupLayout layout = new GroupLayout(dialog.getContentPane());
+    layout.setAutoCreateGaps(true);
+    layout.setAutoCreateContainerGaps(true);
+  
+    dialog.getContentPane().setLayout(layout);
+    layout.setHorizontalGroup(layout.createParallelGroup(TRAILING)
+      .addGroup(layout.createParallelGroup(CENTER)
+        .addComponent(options))
+        .addGroup(layout.createSequentialGroup()
+          .addComponent(blank)
+          .addComponent(throbber)
+          .addGap(30)
+          .addComponent(cancel)
+          .addComponent(connect))
+    );
+    
+    layout.setVerticalGroup(layout.createSequentialGroup()
+      .addComponent(options)
+      .addGroup(layout.createParallelGroup()
+        .addComponent(blank)
+        .addComponent(throbber)
+        .addComponent(cancel)
+        .addComponent(connect))
+    );
+  
+    dialog.getRootPane().registerKeyboardAction(new ActionListener()
+    {
+      public void actionPerformed(ActionEvent e)
+      {
+        dialog.setVisible(false);
+      }
+    }, getKeyStroke(VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
+
+    dialog.getRootPane().registerKeyboardAction(new ActionListener()
+    {
+      public void actionPerformed(ActionEvent e)
+      {
+        connect.doClick();
+      }
+    }, getKeyStroke(VK_ENTER, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
+    
+    
+    dialog.pack();
+    dialog.setLocationRelativeTo(this);
+    dialog.setResizable(false);
+    connect.requestFocusInWindow();
+    dialog.getContentPane().setBackground(Color.white);
+    dialog.setVisible(true);
+  }
+
   private int writeGraph(RDFFormat format, GraphQueryResult result, Writer writer, AtomicReference<Boolean> exportHalt)
   {
     int count = 0;
@@ -1939,6 +2212,13 @@ public class Splink extends JFrame
     out.format(message, args);
     setMessage(ERROR_CLR.getColor(), "Error!");
   }
+
+  public void setBigError(float size, String message, Object... args)
+  {
+    setResultAreaMessage(ERROR_CLR.getColor(), size, message, args);
+    setMessage(ERROR_CLR.getColor(), "Error!");
+  }
+  
   
   public void setMessage(String message, Object... args)
   {
@@ -2050,7 +2330,7 @@ public class Splink extends JFrame
       new QueryLimitAction(10000, getKeyStroke(VK_4, META_MASK)),
     };
   
-  private SplinkAction mSubmiteQuery = new SplinkAction("Submit", getKeyStroke(VK_ENTER, CTRL_MASK),  "perform query in current editor")
+  private SplinkAction mPerformQuery = new SplinkAction("Submit", getKeyStroke(VK_ENTER, CTRL_MASK),  "perform query in current editor")
   {
     public void actionPerformed(ActionEvent e)
     {
@@ -2090,12 +2370,18 @@ public class Splink extends JFrame
     }
   };  
 
-  private SplinkAction mReloadNameSpace = new SplinkAction("Reinitialize Connection", getKeyStroke(VK_N, META_MASK),  "refresh repository list, prefixes and contexts")
+  private SplinkAction mConnect = new SplinkAction("Connect", getKeyStroke(VK_C, CTRL_MASK),  "connect to a sesame server")
+  {
+    public void actionPerformed(ActionEvent e)    
+    {
+      initializeRepository(INHIBIT_AUTO_CONNECT);
+    }
+  };
+  private SplinkAction mReinitializeConnection = new SplinkAction("Reinitialize Connection", getKeyStroke(VK_N, META_MASK),  "refresh repository list, prefixes and contexts")
   {
     public void actionPerformed(ActionEvent e)
     {
-      initializeRepositoryList();
-      initializeRepository(SESAME_REPOSITORY.getString());
+      initializeRepository(CONNECT_AS_DIRECTED);
     }
   };
 
@@ -2292,7 +2578,7 @@ public class Splink extends JFrame
   {
     public void actionPerformed(ActionEvent e)    
     {
-      showRepositoryDialog();
+      showRepositoryExportDialog();
     }
   };  
 

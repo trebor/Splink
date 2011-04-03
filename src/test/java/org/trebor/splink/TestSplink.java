@@ -2,14 +2,24 @@ package org.trebor.splink;
 
 import static java.lang.System.out;
 import static org.junit.Assert.*;
+import static org.openrdf.query.QueryLanguage.SPARQL;
 import static org.trebor.splink.Splink.ResourceType.*;
 
+import java.io.StringWriter;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.junit.Test;
+import org.openrdf.query.MalformedQueryException;
+import org.openrdf.query.UnsupportedQueryLanguageException;
+import org.openrdf.query.parser.ParsedQuery;
+import org.openrdf.query.parser.QueryParserUtil;
+import org.openrdf.rio.RDFFormat;
+import org.openrdf.rio.RDFWriter;
+import org.openrdf.rio.Rio;
 import org.trebor.splink.Splink.ResourceType;
 
 public class TestSplink
@@ -98,5 +108,27 @@ public class TestSplink
 
     assertTrue(longUri1, p.matcher(longUri1).matches());
     assertFalse(longUri2, p.matcher(longUri2).matches());
+  }
+  
+  @Test
+  public void parseSparqlTest() throws MalformedQueryException, UnsupportedQueryLanguageException
+  {
+    String query = "SELECT * WHERE {?s ?p ?o}";
+    ParsedQuery parsedQuery = QueryParserUtil.parseQuery(SPARQL, query, null);
+    out.format("parsed query: %s\n", parsedQuery);
+  }
+  
+  @Test
+  public void writerTest()
+  {
+    StringWriter writer = new StringWriter();
+    RDFWriter rdfWriter = null;
+    out.format("formats: %d\n", RDFFormat.values().size());
+
+    for (RDFFormat f: RDFFormat.values())
+    {
+      rdfWriter = Rio.createWriter(f, writer);     
+      out.format("%s writer: %s\n", f, rdfWriter);
+    }
   }
 }
