@@ -120,6 +120,7 @@ import org.openrdf.query.BindingSet;
 import org.openrdf.query.BooleanQuery;
 import org.openrdf.query.GraphQuery;
 import org.openrdf.query.GraphQueryResult;
+import org.openrdf.query.MalformedQueryException;
 import org.openrdf.query.QueryEvaluationException;
 import org.openrdf.query.QueryLanguage;
 import org.openrdf.query.TupleQuery;
@@ -141,7 +142,6 @@ import org.openrdf.rio.RDFHandlerException;
 import org.openrdf.rio.RDFWriter;
 import org.openrdf.rio.Rio;
 
-import static org.openrdf.query.QueryLanguage.*;
 import static org.trebor.splink.Splink.Property.*;
 import static org.trebor.splink.Splink.AutoConnectBehavior.*;
 import static org.trebor.splink.Splink.ResourceType.*;
@@ -164,6 +164,7 @@ public class Splink extends JFrame
   public static final String QUERY_REPO_NAME_DESCRIPTION = "SELECT ?name ?label WHERE {?_ sys:repositoryID ?name. ?_ rdfs:label ?label}";
   public static final String QUERY_FOR_EXPORT = "CONSTRUCT {?s ?p ?o} WHERE {?s ?p ?o}";
   public static final String DEFAULT_QUERY = "SELECT\n\t*\nWHERE\n{\n\t?s ?p ?o\n}";
+  public static final String BLANK_NODE_QUERY = "CONSTRUCT * FROM {%s} x {y}";
   public static final String PROPERTIES_FILE = System.getProperty("user.home") + File.separator + ".splink";
   public static final String QUERY_NAME_KEY_BASE = "query.name.";
   public static final String QUERY_VALUE_KEY_BASE = "query.value.";
@@ -1422,17 +1423,16 @@ public class Splink extends JFrame
   private void inspectResource(String resourceString)
   {
     SplinkResource resource = new SplinkResource(resourceString);
+    String query = null;
 
     switch (resource.getType())
     {
     case BLANK_NODE:
-      setError("sorry you can't inspect blank nodes like:"
-        + "\n\n   %s\n\nif you now how " + "to make a query which CAN\n"
-        + "ispect such nodes context the splink\n"
-        + "developers at github.com.", resource);
+      query = format(BLANK_NODE_QUERY, resource);
+      submitQuery(query, false, true);
       break;
     case LITERAL:
-      String query =
+      query =
         format("SELECT * " + "WHERE { ?subject ?predicate ?object "
           + "FILTER ( ?subject = %s || ?object = %s)}",
           resource.getCanonical(), resource.getCanonical());
@@ -1696,8 +1696,16 @@ public class Splink extends JFrame
   {
     try
     {
-      ParsedQuery parsedQuery =
-        QueryParserUtil.parseQuery(SPARQL, queryString, null);
+      ParsedQuery parsedQuery = null;
+      QueryLanguage queryLanguage = QueryLanguage.SPARQL;
+
+      try {
+        parsedQuery = QueryParserUtil.parseQuery(QueryLanguage.SPARQL, queryString, null);
+      } catch (MalformedQueryException mqe) {
+        // try SERQL
+        parsedQuery = QueryParserUtil.parseQuery(QueryLanguage.SERQL, queryString, null);
+        queryLanguage = QueryLanguage.SERQL;
+      }
 
       // if there is a query limit, apply it
 
@@ -1780,7 +1788,7 @@ public class Splink extends JFrame
         setMessage(message);
         setResultAreaMessage(50, message);
         GraphQuery query =
-          mConnection.prepareGraphQuery(QueryLanguage.SPARQL, queryString);
+          mConnection.prepareGraphQuery(queryLanguage, queryString);
         query.setIncludeInferred(includeInffered);
         int rows = resultProcessor.process(query.evaluate());
         setMessage("seconds: %2.2f, cols: %d, rows: %s%s",
