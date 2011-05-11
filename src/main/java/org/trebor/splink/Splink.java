@@ -717,6 +717,10 @@ public class Splink extends JFrame
     }
   }
   
+  public boolean showShortUris()
+  {
+    return !mShowLongUriCbmi.getState();
+  }
   
   public String shortUri(String longUri)
   {
@@ -1017,7 +1021,7 @@ public class Splink extends JFrame
     mPrefix.addMouseListener(new PopupListener(mPrefix));
   }
 
-  class PopupListener extends MouseAdapter
+  public class PopupListener extends MouseAdapter
   {
     private final JTable mTable;
 
@@ -1329,6 +1333,13 @@ public class Splink extends JFrame
     resultComponent.setHorizontalAlignment(JLabel.CENTER);
     setResultComponent(resultComponent);
   }
+
+  
+  public void setResultView(View view)
+  {
+    mResultsHandler = view.getResultsListener();
+    setResultComponent(view.getViewComponent());
+  }
   
   public void setResultComponent(Component c)
   {
@@ -1573,6 +1584,8 @@ public class Splink extends JFrame
     }
     
   }
+
+  private ResultsListener mResultsHandler;
   
   private QueryResultsProcessor mDefaultResultsProcessor =
     new QueryResultsProcessor()

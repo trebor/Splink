@@ -6,7 +6,6 @@ import static org.openrdf.query.QueryLanguage.SPARQL;
 import static org.trebor.splink.Splink.ResourceType.*;
 
 import java.io.StringWriter;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Matcher;
