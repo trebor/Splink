@@ -53,7 +53,7 @@ import java.util.Map;
 import java.util.Stack;
 import java.util.Vector;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -1722,7 +1722,7 @@ public class Splink extends JFrame
 
       // if there is a query limit, apply it
 
-      final AtomicInteger actualLimit = new AtomicInteger(NO_QUERY_LIMIT);
+      final AtomicLong actualLimit = new AtomicLong(NO_QUERY_LIMIT);
       if (limitResults && mQueryLimit != NO_QUERY_LIMIT &&
         !(parsedQuery instanceof ParsedGraphQuery))
       {

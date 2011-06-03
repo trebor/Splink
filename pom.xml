@@ -73,6 +73,7 @@
   <properties>
     <packageName>${project.name}-${project.version}</packageName>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <openrdf-version>2.4.0</openrdf-version>
   </properties>
 
   <dependencies>
@@ -98,7 +99,7 @@
     <dependency>
       <groupId>org.openrdf.sesame</groupId>
       <artifactId>sesame-runtime</artifactId>
-      <version>2.3.2</version>
+      <version>${openrdf-version}</version>
     </dependency>
 
   </dependencies>
