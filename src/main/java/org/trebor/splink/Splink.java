@@ -175,10 +175,12 @@ public class Splink extends JFrame implements MessageHandler
   public static final String LITERAL_RE = format("\"(\\p{ASCII}*)\"((@|\\^\\^)(%s|%s|<%s>))?", URI_IDENTIFIER_RE, SHORT_URI_RE, LONG_URI_RE);
   public static final String BLANK_NODE_RE = format("_:%s", URI_IDENTIFIER_RE);
   public static final int NO_QUERY_LIMIT = Integer.MIN_VALUE;
+  public static final int NO_QUERY_TIMEOUT = -1;
   public static final int QUERY_CANCELED = Integer.MIN_VALUE + 1;
   protected static final String HOST_PORT_URL_FORMAT = "http://%s:%d/openrdf-sesame";
   
   private int mQueryLimit;
+  private int mQueryTimeout;
   private UndoManager mCurrentUndoManagaer;
   private Properties mProperties;
   private JScrollPane mPrefixScroll;
@@ -254,6 +256,7 @@ public class Splink extends JFrame implements MessageHandler
     AUTO_CONNECT("network.autoconnect", Boolean.class, false),
 
     QUERY_RESULT_LIIMT("query.result.limit", Integer.class, 100),
+    QUERY_RESULT_TIMEOUT("query.result.timeout", Integer.class, 10),
 
     EXPORT_DIRECTORY("file.export.directory", String.class, System.getProperty("user.home")),
     EXPORT_TYPE("file.export.type", String.class, RDFFormat.TURTLE.getName()),
@@ -1198,9 +1201,34 @@ public class Splink extends JFrame implements MessageHandler
     {
       JRadioButtonMenuItem button =
         new JRadioButtonMenuItem(new QueryLimitAction(
-          QUERY_RESULT_LIIMT.getInteger(), getKeyStroke(VK_5, META_MASK)));
+          QUERY_RESULT_LIIMT.getInteger(), getKeyStroke(VK_9, META_MASK)));
       limitButtonGroup.add(button);
       limitMenu.add(button);
+      button.doClick();
+    }
+
+    // add the query timout menu
+
+    JMenu timeoutMenu = new JMenu("Execution Timeout");
+    queryMenu.add(timeoutMenu);
+
+    ButtonGroup timeoutButtonGroup = new ButtonGroup();
+    for (QueryTimeoutAction timeout : mQueryTimeoutActions)
+    {
+      JRadioButtonMenuItem button = new JRadioButtonMenuItem(timeout);
+      timeoutButtonGroup.add(button);
+      timeoutMenu.add(button);
+      if (timeout.getLimit() == QUERY_RESULT_TIMEOUT.getInteger())
+        button.doClick();
+    }
+
+    if (timeoutButtonGroup.getSelection() == null)
+    {
+      JRadioButtonMenuItem button =
+        new JRadioButtonMenuItem(new QueryTimeoutAction(
+          QUERY_RESULT_TIMEOUT.getInteger(), getKeyStroke(VK_9, CTRL_MASK)));
+      timeoutButtonGroup.add(button);
+      timeoutMenu.add(button);
       button.doClick();
     }
 
@@ -1760,12 +1788,16 @@ public class Splink extends JFrame implements MessageHandler
 
       if (parsedQuery instanceof ParsedBooleanQuery)
       {
-        String message = "asking...";
+        String message = format("asking%s...",
+          mQueryTimeout == NO_QUERY_TIMEOUT
+          ? " (no timeout)"
+          : " timeout " + mQueryTimeout + " seconds");
         messageHandler.handleMessage(message);
         setResultAreaMessage(50, message);
 
         BooleanQuery query =
           mConnection.prepareBooleanQuery(QueryLanguage.SPARQL, queryString);
+        query.setMaxQueryTime(mQueryTimeout);
         query.setIncludeInferred(includeInffered);
         boolean result = query.evaluate();
         resultProcessor.process(result);
@@ -1778,14 +1810,19 @@ public class Splink extends JFrame implements MessageHandler
       else if (parsedQuery instanceof ParsedTupleQuery)
       {
         String message =
-          format("querying%s...", actualLimit.get() == NO_QUERY_LIMIT
+          format("querying%s%s...", actualLimit.get() == NO_QUERY_LIMIT
             ? " (no limit)"
-            : " with limit " + actualLimit.get());
+            : " with limit " + actualLimit.get(),
+            mQueryTimeout == NO_QUERY_TIMEOUT
+            ? " (no timeout)"
+            : " timeout " + mQueryTimeout + " seconds"
+          );
         messageHandler.handleMessage(message);
         setResultAreaMessage(50, message);
 
         TupleQuery query =
           mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
+        query.setMaxQueryTime(mQueryTimeout);
         query.setIncludeInferred(includeInffered);
         TupleQueryResult result = query.evaluate();
         int rows = resultProcessor.process(result);
@@ -1804,13 +1841,18 @@ public class Splink extends JFrame implements MessageHandler
       else if (parsedQuery instanceof ParsedGraphQuery)
       {
         String message =
-          format("describing%s...", actualLimit.get() == NO_QUERY_LIMIT
+          format("describing%s%s...", actualLimit.get() == NO_QUERY_LIMIT
             ? " (no limit)"
-            : " with limit " + actualLimit.get());
+            : " with limit " + actualLimit.get(),
+            mQueryTimeout == NO_QUERY_TIMEOUT
+            ? " (no timeout)"
+            : " timeout " + mQueryTimeout + " seconds"
+          );
         messageHandler.handleMessage(message);
         setResultAreaMessage(50, message);
         GraphQuery query =
           mConnection.prepareGraphQuery(queryLanguage, queryString);
+        query.setMaxQueryTime(mQueryTimeout);
         query.setIncludeInferred(includeInffered);
         int rows = resultProcessor.process(query.evaluate());
         messageHandler.handleMessage("seconds: %2.2f, cols: %d, rows: %s%s",
@@ -2356,6 +2398,36 @@ public class Splink extends JFrame implements MessageHandler
     }
   }
 
+  class QueryTimeoutAction extends SplinkAction
+  {
+    private final int mTimeout;
+    
+    public QueryTimeoutAction(int timeout, KeyStroke key)
+    {
+      super(timeout == NO_QUERY_TIMEOUT
+        ? "Untimed"
+        : timeout + " Seconds", key, timeout == NO_QUERY_TIMEOUT
+        ? "execute query potentially forever"
+        : "execute query for no more then " + timeout + " seconds");
+      mTimeout = timeout;
+    }
+
+    public void actionPerformed(ActionEvent arg0)
+    {
+      mQueryTimeout = mTimeout;
+      if (getLimit() == NO_QUERY_TIMEOUT)
+        handleMessage("query execution time unlimited");
+      else
+        handleMessage("query execution time limited to %d seconds", getLimit());
+      updateEnabled();
+    }
+    
+    public int getLimit()
+    {
+      return mTimeout;
+    }
+  }
+
   private QueryLimitAction [] mQuerylimitActions =
     {
       new QueryLimitAction(NO_QUERY_LIMIT, getKeyStroke(VK_0, META_MASK)),
@@ -2363,7 +2435,25 @@ public class Splink extends JFrame implements MessageHandler
       new QueryLimitAction(100, getKeyStroke(VK_2, META_MASK)),
       new QueryLimitAction(1000, getKeyStroke(VK_3, META_MASK)),
       new QueryLimitAction(10000, getKeyStroke(VK_4, META_MASK)),
+      new QueryLimitAction(100000, getKeyStroke(VK_5, META_MASK)),
+      new QueryLimitAction(1000000, getKeyStroke(VK_6, META_MASK)),
+      new QueryLimitAction(10000000, getKeyStroke(VK_7, META_MASK)),
+      new QueryLimitAction(100000000, getKeyStroke(VK_8, META_MASK)),
     };
+
+  private QueryTimeoutAction [] mQueryTimeoutActions =
+  {
+    new QueryTimeoutAction(NO_QUERY_TIMEOUT, getKeyStroke(VK_0, CTRL_MASK)),
+    new QueryTimeoutAction(10, getKeyStroke(VK_1, CTRL_MASK)),
+    new QueryTimeoutAction(20, getKeyStroke(VK_2, CTRL_MASK)),
+    new QueryTimeoutAction(30, getKeyStroke(VK_3, CTRL_MASK)),
+    new QueryTimeoutAction(40, getKeyStroke(VK_4, CTRL_MASK)),
+    new QueryTimeoutAction(50, getKeyStroke(VK_5, CTRL_MASK)),
+    new QueryTimeoutAction(60, getKeyStroke(VK_6, CTRL_MASK)),
+    new QueryTimeoutAction(70, getKeyStroke(VK_7, CTRL_MASK)),
+    new QueryTimeoutAction(80, getKeyStroke(VK_8, CTRL_MASK)),
+  };
+  
   
   private SplinkAction mPerformQuery = new SplinkAction("Submit", getKeyStroke(VK_ENTER, CTRL_MASK),  "perform query in current editor")
   {
@@ -2664,6 +2754,7 @@ public class Splink extends JFrame implements MessageHandler
       .getWidth());
     
     QUERY_RESULT_LIIMT.set(mQueryLimit);
+    QUERY_RESULT_TIMEOUT.set(mQueryTimeout);
 
     // expunge old edior state
     
