@@ -122,6 +122,7 @@ import org.openrdf.query.GraphQuery;
 import org.openrdf.query.GraphQueryResult;
 import org.openrdf.query.MalformedQueryException;
 import org.openrdf.query.QueryEvaluationException;
+import org.openrdf.query.QueryInterruptedException;
 import org.openrdf.query.QueryLanguage;
 import org.openrdf.query.TupleQuery;
 import org.openrdf.query.TupleQueryResult;
@@ -1736,6 +1737,7 @@ public class Splink extends JFrame implements MessageHandler
     boolean limitResults, MessageHandler messageHandler,
     QueryResultsProcessor resultProcessor, AtomicReference<Boolean> queryHalt)
   {
+    long startTime = 0;
     try
     {
       ParsedQuery parsedQuery = null;
@@ -1782,16 +1784,16 @@ public class Splink extends JFrame implements MessageHandler
 
       // register start time of expression
 
-      long startTime = System.currentTimeMillis();
+      startTime = System.currentTimeMillis();
 
       // if this is a slice create, an ask query
 
       if (parsedQuery instanceof ParsedBooleanQuery)
       {
-        String message = format("asking%s...",
-          mQueryTimeout == NO_QUERY_TIMEOUT
-          ? " (no timeout)"
-          : " timeout " + mQueryTimeout + " seconds");
+        String message =
+          format("asking%s...", mQueryTimeout == NO_QUERY_TIMEOUT
+            ? " (no timeout)"
+            : " timeout " + mQueryTimeout + " seconds");
         messageHandler.handleMessage(message);
         setResultAreaMessage(50, message);
 
@@ -1814,9 +1816,8 @@ public class Splink extends JFrame implements MessageHandler
             ? " (no limit)"
             : " with limit " + actualLimit.get(),
             mQueryTimeout == NO_QUERY_TIMEOUT
-            ? " (no timeout)"
-            : " timeout " + mQueryTimeout + " seconds"
-          );
+              ? " (no timeout)"
+              : " timeout " + mQueryTimeout + " seconds");
         messageHandler.handleMessage(message);
         setResultAreaMessage(50, message);
 
@@ -1845,9 +1846,8 @@ public class Splink extends JFrame implements MessageHandler
             ? " (no limit)"
             : " with limit " + actualLimit.get(),
             mQueryTimeout == NO_QUERY_TIMEOUT
-            ? " (no timeout)"
-            : " timeout " + mQueryTimeout + " seconds"
-          );
+              ? " (no timeout)"
+              : " timeout " + mQueryTimeout + " seconds");
         messageHandler.handleMessage(message);
         setResultAreaMessage(50, message);
         GraphQuery query =
@@ -1868,10 +1868,17 @@ public class Splink extends JFrame implements MessageHandler
         messageHandler.handleError("Unknown query type: " + parsedQuery);
       }
     }
+    catch (QueryInterruptedException qie)
+    {
+      messageHandler.handleMessage(
+        "seconds: %2.2f, query reached timeout limit of %d seconds",
+        (System.currentTimeMillis() - startTime) / 1000.f, mQueryTimeout);
+      setResultAreaMessage(50, "query timed out");
+    }
     catch (Exception e)
     {
-      messageHandler.handleError(e, "------ query ------\n\n%s\n\n-------------------\n",
-        queryString);
+      messageHandler.handleError(e,
+        "------ query ------\n\n%s\n\n-------------------\n", queryString);
     }
   }
 
