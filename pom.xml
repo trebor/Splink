@@ -73,7 +73,7 @@
   <properties>
     <packageName>${project.name}-${project.version}</packageName>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <openrdf-version>2.4.0</openrdf-version>
+    <openrdf-version>2.5.0</openrdf-version>
   </properties>
 
   <dependencies>

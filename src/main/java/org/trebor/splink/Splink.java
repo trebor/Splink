@@ -154,7 +154,7 @@ import static java.lang.System.out;
 import static java.lang.Math.max;
 
 @SuppressWarnings("serial")
-public class Splink extends JFrame
+public class Splink extends JFrame implements MessageHandler
 {
   public static final String SYSTEM_REPO_NAME = "SYSTEM";
   public static final String RDF_PREFIX = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
@@ -430,7 +430,7 @@ public class Splink extends JFrame
           setBigError(25, "%s to %s", e.getCause().getMessage(), url);
       }
       else
-        setError(e, "Connecting to %s", url);
+        handleError(e, "Connecting to %s", url);
     }
   }
 
@@ -442,7 +442,7 @@ public class Splink extends JFrame
     // get repo list
 
     performQuery(SYSTEM_PREFIXES + QUERY_REPO_NAME_DESCRIPTION, 
-      false, false, new QueryResultsProcessor()
+      false, false, this, new QueryResultsProcessor()
     {
       public int process(TupleQueryResult result)
         throws QueryEvaluationException
@@ -531,11 +531,11 @@ public class Splink extends JFrame
 
       setResultAreaMessage(80, repositoryName + " is ready!");
       if (null != warning) 
-        setWarning(warning);
+        handleWarning(warning);
     }
     catch (RepositoryException e)
     {
-      setError(e);
+      handleError(e);
     }
 
     return true;
@@ -631,7 +631,7 @@ public class Splink extends JFrame
   {
     try
     {
-      setMessage("initializing %s namespace...", repositoryName);
+      handleMessage("initializing %s namespace...", repositoryName);
 
       // init name-space map and a buffer to build the query prefix string
 
@@ -690,11 +690,11 @@ public class Splink extends JFrame
         valueCol.setHeaderRenderer(mTableHeaderRenderer);
       }
 
-      setMessage("initialized %s namespace.", repositoryName);
+      handleMessage("initialized %s namespace.", repositoryName);
     }
     catch (Exception e)
     {
-      setError(e);
+      handleError(e);
     }
   }
 
@@ -897,7 +897,7 @@ public class Splink extends JFrame
     mPrefix.addMouseListener(ml);
     mContext.addMouseListener(ml);
 
-    // composit the gui frame
+    // compose the gui frame
     
     constructFrame(frame);
 
@@ -1541,7 +1541,7 @@ public class Splink extends JFrame
         mPreviousQuery.setEnabled(false);
 
         performQuery(fullQuery, mShowInferredCbmi.isSelected(), true,
-          mDefaultResultsProcessor, null);
+          Splink.this, mDefaultResultsProcessor, null);
 
         mPerformQuery.setEnabled(submitEnabled);
         mPreviousQuery.setEnabled(previousEnabled);
@@ -1585,6 +1585,7 @@ public class Splink extends JFrame
     
   }
 
+  @SuppressWarnings("unused")
   private ResultsListener mResultsHandler;
   
   private QueryResultsProcessor mDefaultResultsProcessor =
@@ -1704,19 +1705,24 @@ public class Splink extends JFrame
     };
   
   public void performQuery(String queryString, boolean includeInffered,
-    boolean limitResults, QueryResultsProcessor resultProcessor, 
-    AtomicReference<Boolean> queryHalt)
+    boolean limitResults, MessageHandler messageHandler,
+    QueryResultsProcessor resultProcessor, AtomicReference<Boolean> queryHalt)
   {
     try
     {
       ParsedQuery parsedQuery = null;
       QueryLanguage queryLanguage = QueryLanguage.SPARQL;
 
-      try {
-        parsedQuery = QueryParserUtil.parseQuery(QueryLanguage.SPARQL, queryString, null);
-      } catch (MalformedQueryException mqe) {
+      try
+      {
+        parsedQuery =
+          QueryParserUtil.parseQuery(QueryLanguage.SPARQL, queryString, null);
+      }
+      catch (MalformedQueryException mqe)
+      {
         // try SERQL
-        parsedQuery = QueryParserUtil.parseQuery(QueryLanguage.SERQL, queryString, null);
+        parsedQuery =
+          QueryParserUtil.parseQuery(QueryLanguage.SERQL, queryString, null);
         queryLanguage = QueryLanguage.SERQL;
       }
 
@@ -1755,7 +1761,7 @@ public class Splink extends JFrame
       if (parsedQuery instanceof ParsedBooleanQuery)
       {
         String message = "asking...";
-        setMessage(message);
+        messageHandler.handleMessage(message);
         setResultAreaMessage(50, message);
 
         BooleanQuery query =
@@ -1763,7 +1769,7 @@ public class Splink extends JFrame
         query.setIncludeInferred(includeInffered);
         boolean result = query.evaluate();
         resultProcessor.process(result);
-        setMessage("seconds: %2.2f, result: %b",
+        messageHandler.handleMessage("seconds: %2.2f, result: %b",
           (System.currentTimeMillis() - startTime) / 1000.f, result);
       }
 
@@ -1771,22 +1777,24 @@ public class Splink extends JFrame
 
       else if (parsedQuery instanceof ParsedTupleQuery)
       {
-        String message = format("querying%s...", actualLimit.get() == NO_QUERY_LIMIT
-          ? " (no limit)"
-          : " with limit " + actualLimit.get());
-        setMessage(message);
+        String message =
+          format("querying%s...", actualLimit.get() == NO_QUERY_LIMIT
+            ? " (no limit)"
+            : " with limit " + actualLimit.get());
+        messageHandler.handleMessage(message);
         setResultAreaMessage(50, message);
-        
+
         TupleQuery query =
           mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
         query.setIncludeInferred(includeInffered);
         TupleQueryResult result = query.evaluate();
         int rows = resultProcessor.process(result);
         int columns = result.getBindingNames().size();
-        setMessage("seconds: %2.2f, cols: %d, rows: %s%s",
+        messageHandler.handleMessage("seconds: %2.2f, cols: %d, rows: %s%s",
           (System.currentTimeMillis() - startTime) / 1000.f, columns,
-          (rows == QUERY_CANCELED ? "[canceled]": "" + rows),
-          rows == actualLimit.get()
+          (rows == QUERY_CANCELED
+            ? "[canceled]"
+            : "" + rows), rows == actualLimit.get()
             ? " (limited)"
             : "");
       }
@@ -1795,30 +1803,32 @@ public class Splink extends JFrame
 
       else if (parsedQuery instanceof ParsedGraphQuery)
       {
-        String message = format("describing%s...", actualLimit.get() == NO_QUERY_LIMIT
-          ? " (no limit)"
-          : " with limit " + actualLimit.get());
-        setMessage(message);
+        String message =
+          format("describing%s...", actualLimit.get() == NO_QUERY_LIMIT
+            ? " (no limit)"
+            : " with limit " + actualLimit.get());
+        messageHandler.handleMessage(message);
         setResultAreaMessage(50, message);
         GraphQuery query =
           mConnection.prepareGraphQuery(queryLanguage, queryString);
         query.setIncludeInferred(includeInffered);
         int rows = resultProcessor.process(query.evaluate());
-        setMessage("seconds: %2.2f, cols: %d, rows: %s%s",
-          (System.currentTimeMillis() - startTime) / 1000.f, 3, 
-          (rows == QUERY_CANCELED ? "[canceled]": "" + rows),
-          rows == actualLimit.get()
+        messageHandler.handleMessage("seconds: %2.2f, cols: %d, rows: %s%s",
+          (System.currentTimeMillis() - startTime) / 1000.f, 3,
+          (rows == QUERY_CANCELED
+            ? "[canceled]"
+            : "" + rows), rows == actualLimit.get()
             ? " (limited)"
             : "");
       }
       else
       {
-        setError("Unknown query type: " + parsedQuery);
+        messageHandler.handleError("Unknown query type: " + parsedQuery);
       }
     }
     catch (Exception e)
     {
-      setError(e, "------ query ------\n\n%s\n\n-------------------\n",
+      messageHandler.handleError(e, "------ query ------\n\n%s\n\n-------------------\n",
         queryString);
     }
   }
@@ -1841,14 +1851,14 @@ public class Splink extends JFrame
         }
         catch (IOException e)
         {
-          setError(e);
+          handleError(e);
         }
         
         return count;
       }
     };
 
-    performQuery(mQueryPrefixString + QUERY_FOR_EXPORT, includeInferred, false, exportQrp, exportHalt);
+    performQuery(mQueryPrefixString + QUERY_FOR_EXPORT, includeInferred, false, this, exportQrp, exportHalt);
   }
   
   private void showRepositoryExportDialog()
@@ -2196,11 +2206,11 @@ public class Splink extends JFrame
     }
     catch (QueryEvaluationException e)
     {
-      setError(e);
+      handleError(e);
     }
     catch (RDFHandlerException e)
     {
-      setError(e);
+      handleError(e);
     }
     
     return count;
@@ -2213,25 +2223,27 @@ public class Splink extends JFrame
       setMessage(Color.BLUE, message, args);
   }
   
-  public void setError(Exception e, String message, Object... args)
+  public String handleError(Exception e, String format, Object... args)
   {
     StringWriter writer = new StringWriter();
     PrintWriter pw = new PrintWriter(writer);
     e.printStackTrace(pw);
-    setError("%s\n%s", format(message, args), writer.getBuffer().toString());
+    return handleError("%s\n%s", format(format, args), writer.getBuffer().toString());
   }
 
-  public void setError(Exception e)
+  public String handleError(Exception e)
   {
-    setError(e, "");
+    return handleError(e, "");
   }
 
-  public void setError(String message, Object... args)
+  public String handleError(String format, Object... args)
   {
-    mErrorText.setText(format(message, args));
+    String errorString = format(format, args);
+    mErrorText.setText(errorString);
     setResultComponent(mErrorText);
-    out.format(message, args);
+    out.format(format, args);
     setMessage(ERROR_CLR.getColor(), "Error!");
+    return errorString;
   }
 
   public void setBigError(float size, String message, Object... args)
@@ -2241,19 +2253,19 @@ public class Splink extends JFrame
   }
   
   
-  public void setMessage(String message, Object... args)
+  public String handleMessage(String format, Object... args)
   {
-    setMessage(MESSAGE_CLR.getColor(), message, args);
+    return setMessage(MESSAGE_CLR.getColor(), format, args);
   }
   
-  public void setWarning(String message, Object... args)
+  public String handleWarning(String format, Object... args)
   {
-    setMessage(WARN_CLR.getColor(), "WARNING: " + message, args);
+    return setMessage(WARN_CLR.getColor(), "WARNING: " + format, args);
   }
   
-  public void setMessage(Color color, String message, Object... args)
+  public String setMessage(Color color, String format, Object... args)
   {
-    String fullMessage = String.format(message, args);
+    String fullMessage = String.format(format, args);
     if (null != mStatusBar)
     {
       String toolTip =
@@ -2266,6 +2278,8 @@ public class Splink extends JFrame
     }
     else
       System.out.println(fullMessage);
+    
+    return fullMessage;
   }  
   
   /**
@@ -2330,9 +2344,9 @@ public class Splink extends JFrame
     {
       mQueryLimit = mLimit;
       if (getLimit() == NO_QUERY_LIMIT)
-        setMessage("query results size unlimited");
+        handleMessage("query results size unlimited");
       else
-        setMessage("query results limited to %d rows", getLimit());
+        handleMessage("query results limited to %d rows", getLimit());
       updateEnabled();
     }
     
@@ -2449,7 +2463,7 @@ public class Splink extends JFrame
       }
       catch (BadLocationException e1)
       {
-        setError(e1);
+        handleError(e1);
       }
     }
   };
@@ -2494,7 +2508,7 @@ public class Splink extends JFrame
       }
       catch (BadLocationException e1)
       {
-        setError(e1);
+        handleError(e1);
       }
     }
   };

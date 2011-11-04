@@ -17,6 +17,11 @@ public class MaximumSizeMessageHandlerPanel extends JPanel implements MessageHan
   private final Color mWarningColor;
   private final Color mMessageColor;
   
+  public MaximumSizeMessageHandlerPanel()
+  {
+    this(Color.white, Color.red, Color.yellow, Color.black);
+  }
+
   public MaximumSizeMessageHandlerPanel(Color background, Color error, Color warning, Color message)
   {
     this.setBackground(background);
@@ -54,5 +59,16 @@ public class MaximumSizeMessageHandlerPanel extends JPanel implements MessageHan
   public String handleError(String format, Object... args)
   {
     return setMessage(mErrorColor, format, args);
+  }
+
+  public String handleError(Exception exception, String format,
+    Object... args)
+  {
+    return setMessage(mErrorColor, exception.getMessage() + format, args);
+  }
+
+  public String handleError(Exception exception)
+  {
+    return setMessage(mErrorColor, exception.getMessage());
   }
 }

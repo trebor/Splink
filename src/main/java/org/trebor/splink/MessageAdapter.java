@@ -18,4 +18,15 @@ public class MessageAdapter implements MessageHandler
   {
     return format(format, args);
   }
+
+  public String handleError(Exception exception, String format,
+    Object... args)
+  {
+    return format(exception.getMessage() + format, args);
+  }
+
+  public String handleError(Exception exception)
+  {
+    return format(exception.getMessage());
+  }
 }
