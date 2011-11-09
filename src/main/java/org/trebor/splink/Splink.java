@@ -1169,6 +1169,7 @@ public class Splink extends JFrame implements MessageHandler
     storeMenu.add(mConnect);
     mRepositoryListMenu = new JMenu("Repositories");
     storeMenu.add(mRepositoryListMenu);
+    storeMenu.add(mCloseConnectionAction);
 
     // query menu
 
@@ -1825,7 +1826,9 @@ public class Splink extends JFrame implements MessageHandler
           mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
         query.setMaxQueryTime(mQueryTimeout);
         query.setIncludeInferred(includeInffered);
+        out.println("pre query!");
         TupleQueryResult result = query.evaluate();
+        out.println("post query!");
         int rows = resultProcessor.process(result);
         int columns = result.getBindingNames().size();
         messageHandler.handleMessage("seconds: %2.2f, cols: %d, rows: %s%s",
@@ -2688,6 +2691,30 @@ public class Splink extends JFrame implements MessageHandler
     }
   };
   
+  private SplinkAction mCloseConnectionAction = new SplinkAction("Close Connection", getKeyStroke(VK_C,
+    META_MASK),
+    "close connection to repository")
+  {
+    public void actionPerformed(ActionEvent e)
+    {
+      try
+      {
+        out.print("closeing...");
+        mConnection.close();
+        //mConnection = mRepository.getConnection();
+        out.print("closed");
+        mRepository.shutDown();
+        out.print("shut them down, shut them all down!");
+      }
+      catch (RepositoryException e1)
+      {
+        // TODO Auto-generated catch block
+        e1.printStackTrace();
+      }
+      
+    }
+  };
+
   private SplinkAction mMinimizeWindow = new SplinkAction("Minimize/Restore", getKeyStroke(VK_M, META_MASK),  "minimize or restore the splink window")
   {
     public void actionPerformed(ActionEvent e)    
