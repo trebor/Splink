@@ -130,8 +130,9 @@ import org.openrdf.query.algebra.Slice;
 import org.openrdf.query.algebra.helpers.QueryModelVisitorBase;
 import org.openrdf.query.parser.ParsedBooleanQuery;
 import org.openrdf.query.parser.ParsedGraphQuery;
-import org.openrdf.query.parser.ParsedQuery;
+import org.openrdf.query.parser.ParsedOperation;
 import org.openrdf.query.parser.ParsedTupleQuery;
+import org.openrdf.query.parser.ParsedUpdate;
 import org.openrdf.query.parser.QueryParserUtil;
 import org.openrdf.repository.Repository;
 import org.openrdf.repository.RepositoryConnection;
@@ -1169,7 +1170,7 @@ public class Splink extends JFrame implements MessageHandler
     storeMenu.add(mConnect);
     mRepositoryListMenu = new JMenu("Repositories");
     storeMenu.add(mRepositoryListMenu);
-    storeMenu.add(mCloseConnectionAction);
+    //storeMenu.add(mCloseConnectionAction);
 
     // query menu
 
@@ -1741,30 +1742,40 @@ public class Splink extends JFrame implements MessageHandler
     long startTime = 0;
     try
     {
-      ParsedQuery parsedQuery = null;
+      ParsedOperation parsedOperation = null;
       QueryLanguage queryLanguage = QueryLanguage.SPARQL;
 
       try
       {
-        parsedQuery =
+        parsedOperation =
           QueryParserUtil.parseQuery(QueryLanguage.SPARQL, queryString, null);
+
       }
       catch (MalformedQueryException mqe)
       {
-        // try SERQL
-        parsedQuery =
-          QueryParserUtil.parseQuery(QueryLanguage.SERQL, queryString, null);
-        queryLanguage = QueryLanguage.SERQL;
+        try
+        {
+          parsedOperation =
+            QueryParserUtil.parseUpdate(QueryLanguage.SPARQL, queryString,
+              null);
+        }
+        catch (MalformedQueryException mqe2)
+        {
+          parsedOperation =
+            QueryParserUtil
+              .parseQuery(QueryLanguage.SERQL, queryString, null);
+          queryLanguage = QueryLanguage.SERQL;
+        }
       }
 
       // if there is a query limit, apply it
 
       final AtomicLong actualLimit = new AtomicLong(NO_QUERY_LIMIT);
       if (limitResults && mQueryLimit != NO_QUERY_LIMIT &&
-        !(parsedQuery instanceof ParsedGraphQuery))
+        (parsedOperation instanceof ParsedTupleQuery))
       {
         final AtomicBoolean hasLimit = new AtomicBoolean(false);
-        parsedQuery.getTupleExpr().visit(
+        ((ParsedTupleQuery)parsedOperation).getTupleExpr().visit(
           new QueryModelVisitorBase<Exception>()
           {
             public void meet(Slice node) throws Exception
@@ -1787,9 +1798,9 @@ public class Splink extends JFrame implements MessageHandler
 
       startTime = System.currentTimeMillis();
 
-      // if this is a slice create, an ask query
+      // if this is a boolean query, perform a boolean query
 
-      if (parsedQuery instanceof ParsedBooleanQuery)
+      if (parsedOperation instanceof ParsedBooleanQuery)
       {
         String message =
           format("asking%s...", mQueryTimeout == NO_QUERY_TIMEOUT
@@ -1808,9 +1819,9 @@ public class Splink extends JFrame implements MessageHandler
           (System.currentTimeMillis() - startTime) / 1000.f, result);
       }
 
-      // if this is a projection, create an tuple query
+      // if this is a tuple quer, perform a tuple query
 
-      else if (parsedQuery instanceof ParsedTupleQuery)
+      else if (parsedOperation instanceof ParsedTupleQuery)
       {
         String message =
           format("querying%s%s...", actualLimit.get() == NO_QUERY_LIMIT
@@ -1840,9 +1851,9 @@ public class Splink extends JFrame implements MessageHandler
             : "");
       }
 
-      // if this is a reduced, create an graph query
+      // if this is a graph query, perform a graph query
 
-      else if (parsedQuery instanceof ParsedGraphQuery)
+      else if (parsedOperation instanceof ParsedGraphQuery)
       {
         String message =
           format("describing%s%s...", actualLimit.get() == NO_QUERY_LIMIT
@@ -1866,9 +1877,22 @@ public class Splink extends JFrame implements MessageHandler
             ? " (limited)"
             : "");
       }
+
+      // if this is an update, perform update operation
+
+      else if (parsedOperation instanceof ParsedUpdate)
+      {
+        String message = format("updateing...");
+        messageHandler.handleMessage(message);
+        setResultAreaMessage(50, message);
+        mConnection.prepareUpdate(queryLanguage, queryString).execute();
+        messageHandler.handleMessage("seconds: %2.2f",
+          (System.currentTimeMillis() - startTime) / 1000.f, 3);
+        setResultAreaMessage(50, "update processed");
+      }
       else
       {
-        messageHandler.handleError("Unknown query type: " + parsedQuery);
+        messageHandler.handleError("Unknown query type: " + parsedOperation);
       }
     }
     catch (QueryInterruptedException qie)
