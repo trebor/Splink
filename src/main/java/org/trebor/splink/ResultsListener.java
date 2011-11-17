@@ -6,9 +6,11 @@ import org.openrdf.query.TupleQueryResult;
 
 public interface ResultsListener
 {
-  int onTuple(TupleQueryResult result, Splink splink) throws QueryEvaluationException;
+  int onTuple(TupleQueryResult result) throws QueryEvaluationException;
 
-  int onGraph(GraphQueryResult result, Splink splink) throws QueryEvaluationException;
+  int onGraph(GraphQueryResult result) throws QueryEvaluationException;
   
-  boolean onBoolean(boolean result, Splink splink);
+  boolean onBoolean(boolean result);
+  
+  void onUpdate();
 }

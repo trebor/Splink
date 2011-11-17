@@ -38,6 +38,7 @@ public class DefaultResultView extends JPanel implements View,
   public static final Color RESULT_ROW_HIGHLIGHT = new Color(255, 215, 255);
 
   private final JTable mResult;
+  private final Splink mSplink;
 
   TableCellRenderer mTableHeaderRenderer = new DefaultTableCellRenderer()
   {
@@ -66,6 +67,7 @@ public class DefaultResultView extends JPanel implements View,
 
   public DefaultResultView(Splink splink)
   {
+    mSplink = splink;
     mResultTableRenderer =
       new RowStripeTableCellRenderer(RESULT_ROW_HIGHLIGHT);
 
@@ -103,7 +105,7 @@ public class DefaultResultView extends JPanel implements View,
     return this;
   }
 
-  public int onTuple(TupleQueryResult result, Splink splink) throws QueryEvaluationException
+  public int onTuple(TupleQueryResult result) throws QueryEvaluationException
   {
     // create the table model
 
@@ -135,8 +137,8 @@ public class DefaultResultView extends JPanel implements View,
         Binding rowBinding = rowData.next();
         String binding = rowBinding.getName();
         String uri = rowBinding.getValue().toString();
-        if (!splink.showShortUris())
-          uri = splink.shortUri(uri);
+        if (!mSplink.showShortUris())
+          uri = mSplink.shortUri(uri);
         row[columnMap.get(binding)] = uri;
       }
 
@@ -149,14 +151,14 @@ public class DefaultResultView extends JPanel implements View,
     TableColumnModel columnModel = mResult.getColumnModel();
     for (int i = 0; i < tm.getColumnCount(); ++i)
       columnModel.getColumn(i).setHeaderRenderer(mTableHeaderRenderer);
-    splink.setResultComponent(mResult);
+    mSplink.setResultComponent(mResult);
 
     // return row count
 
     return tm.getRowCount();
   }
 
-  public int onGraph(GraphQueryResult result, Splink splink) throws QueryEvaluationException
+  public int onGraph(GraphQueryResult result) throws QueryEvaluationException
   {
     // create the table model
 
@@ -182,7 +184,7 @@ public class DefaultResultView extends JPanel implements View,
     {
       Vector<String> row = new Vector<String>();
       Statement rowData = result.next();
-      if (!splink.showShortUris())
+      if (!mSplink.showShortUris())
       {
         row.add(rowData.getSubject().toString());
         row.add(rowData.getPredicate().toString());
@@ -190,9 +192,9 @@ public class DefaultResultView extends JPanel implements View,
       }
       else
       {
-        row.add(splink.shortUri(rowData.getSubject().toString()));
-        row.add(splink.shortUri(rowData.getPredicate().toString()));
-        row.add(splink.shortUri(rowData.getObject().toString()));
+        row.add(mSplink.shortUri(rowData.getSubject().toString()));
+        row.add(mSplink.shortUri(rowData.getPredicate().toString()));
+        row.add(mSplink.shortUri(rowData.getObject().toString()));
       }
 
       tm.addRow(row);
@@ -204,16 +206,20 @@ public class DefaultResultView extends JPanel implements View,
     for (int i = 0; i < tm.getColumnCount(); ++i)
       mResult.getColumnModel().getColumn(i)
         .setHeaderRenderer(mTableHeaderRenderer);
-    splink.setResultComponent(mResult);
+    mSplink.setResultComponent(mResult);
 
     // return row count
 
     return tm.getRowCount();
   }
 
-  public boolean onBoolean(boolean result, Splink splink)
+  public boolean onBoolean(boolean result)
   {
-    splink.handleMessage(SPLASH, format("%b", result).toUpperCase());
+    mSplink.handleMessage(SPLASH, format("%b", result).toUpperCase());
     return result;
+  }
+
+  public void onUpdate()
+  {
   }
 }

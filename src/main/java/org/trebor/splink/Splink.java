@@ -2729,29 +2729,29 @@ public class Splink extends JFrame implements MessageHandler
     }
   };
   
-  private SplinkAction mCloseConnectionAction = new SplinkAction("Close Connection", getKeyStroke(VK_C,
-    META_MASK),
-    "close connection to repository")
-  {
-    public void actionPerformed(ActionEvent e)
-    {
-      try
-      {
-        out.print("closeing...");
-        mConnection.close();
-        //mConnection = mRepository.getConnection();
-        out.print("closed");
-        mRepository.shutDown();
-        out.print("shut them down, shut them all down!");
-      }
-      catch (RepositoryException e1)
-      {
-        // TODO Auto-generated catch block
-        e1.printStackTrace();
-      }
-      
-    }
-  };
+//  private SplinkAction mCloseConnectionAction = new SplinkAction("Close Connection", getKeyStroke(VK_C,
+//    META_MASK),
+//    "close connection to repository")
+//  {
+//    public void actionPerformed(ActionEvent e)
+//    {
+//      try
+//      {
+//        out.print("closeing...");
+//        mConnection.close();
+//        //mConnection = mRepository.getConnection();
+//        out.print("closed");
+//        mRepository.shutDown();
+//        out.print("shut them down, shut them all down!");
+//      }
+//      catch (RepositoryException e1)
+//      {
+//        // TODO Auto-generated catch block
+//        e1.printStackTrace();
+//      }
+//      
+//    }
+//  };
 
   private SplinkAction mMinimizeWindow = new SplinkAction("Minimize/Restore", getKeyStroke(VK_M, META_MASK),  "minimize or restore the splink window")
   {
