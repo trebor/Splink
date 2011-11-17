@@ -222,4 +222,10 @@ public class DefaultResultView extends JPanel implements View,
   public void onUpdate()
   {
   }
+
+  public MessageHandler getMessageHandler()
+  {
+    // TODO Auto-generated method stub
+    return null;
+  }
 }

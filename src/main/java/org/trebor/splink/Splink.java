@@ -450,9 +450,9 @@ public class Splink extends JFrame implements MessageHandler
     // get repo list
 
     performQuery(SYSTEM_PREFIXES + QUERY_REPO_NAME_DESCRIPTION, 
-      false, false, this, new QueryResultsProcessor()
+      false, false, this, new ResultsAdatper()
     {
-      public int process(TupleQueryResult result)
+      public int onTuple(TupleQueryResult result)
         throws QueryEvaluationException
       {
         mRepositoryList = new HashMap<String, String>();
@@ -490,16 +490,6 @@ public class Splink extends JFrame implements MessageHandler
         }
 
         return mRepositoryList.size();
-      }
-      
-      public int process(GraphQueryResult result)
-      {
-        throw new UnsupportedOperationException();
-      }
-
-      public boolean process(boolean result)
-      {
-        throw new UnsupportedOperationException();
       }
     }, null);
     
@@ -1574,43 +1564,13 @@ public class Splink extends JFrame implements MessageHandler
     return metrics.stringWidth(" " + string);
   }
 
-  public static interface QueryResultsProcessor
-  {
-    int process(TupleQueryResult result) throws QueryEvaluationException;
-
-    int process(GraphQueryResult result) throws QueryEvaluationException;
-    
-    boolean process(boolean result);
-  }
-
-  public static class QueryResultsAdatper implements QueryResultsProcessor
-  {
-    public int process(TupleQueryResult result)
-      throws QueryEvaluationException
-    {
-      throw new UnsupportedOperationException();
-    }
-
-    public int process(GraphQueryResult result)
-      throws QueryEvaluationException
-    {
-      throw new UnsupportedOperationException();
-    }
-
-    public boolean process(boolean result)
-    {
-      throw new UnsupportedOperationException();
-    }
-    
-  }
-
   @SuppressWarnings("unused")
   private ResultsListener mResultsHandler;
   
-  private QueryResultsProcessor mDefaultResultsProcessor =
-    new QueryResultsProcessor()
+  private ResultsListener mDefaultResultsProcessor =
+    new ResultsListener()
     {
-      public int process(TupleQueryResult result)
+      public int onTuple(TupleQueryResult result)
         throws QueryEvaluationException
       {
         // create the table model
@@ -1664,7 +1624,7 @@ public class Splink extends JFrame implements MessageHandler
         return tm.getRowCount();
       }
       
-      public int process(GraphQueryResult result)
+      public int onGraph(GraphQueryResult result)
         throws QueryEvaluationException
       {
         // create the table model
@@ -1716,16 +1676,21 @@ public class Splink extends JFrame implements MessageHandler
         return tm.getRowCount();
       }
 
-      public boolean process(boolean result)
+      public boolean onBoolean(boolean result)
       {
         handleMessage(SPLASH, format("%b", result).toUpperCase());
         return result;
+      }
+      
+      public void onUpdate()
+      {
+        handleMessage(SPLASH, "update performed");
       }
     };
   
   public void performQuery(String queryString, boolean includeInffered,
     boolean limitResults, MessageHandler messageHandler,
-    QueryResultsProcessor resultProcessor, AtomicReference<Boolean> queryHalt)
+    ResultsListener resultsListener, AtomicReference<Boolean> queryHalt)
   {
     long startTime = 0;
     try
@@ -1801,7 +1766,7 @@ public class Splink extends JFrame implements MessageHandler
         query.setMaxQueryTime(mQueryTimeout);
         query.setIncludeInferred(includeInffered);
         boolean result = query.evaluate();
-        resultProcessor.process(result);
+        resultsListener.onBoolean(result);
         messageHandler.handleMessage(STATUS, "seconds: %2.2f, result: %b",
           (System.currentTimeMillis() - startTime) / 1000.f, result);
       }
@@ -1826,7 +1791,7 @@ public class Splink extends JFrame implements MessageHandler
         out.println("pre query!");
         TupleQueryResult result = query.evaluate();
         out.println("post query!");
-        int rows = resultProcessor.process(result);
+        int rows = resultsListener.onTuple(result);
         int columns = result.getBindingNames().size();
         messageHandler.handleMessage(STATUS, "seconds: %2.2f, cols: %d, rows: %s%s",
           (System.currentTimeMillis() - startTime) / 1000.f, columns,
@@ -1853,7 +1818,7 @@ public class Splink extends JFrame implements MessageHandler
           mConnection.prepareGraphQuery(queryLanguage, queryString);
         query.setMaxQueryTime(mQueryTimeout);
         query.setIncludeInferred(includeInffered);
-        int rows = resultProcessor.process(query.evaluate());
+        int rows = resultsListener.onGraph(query.evaluate());
         messageHandler.handleMessage(STATUS, "seconds: %2.2f, cols: %d, rows: %s%s",
           (System.currentTimeMillis() - startTime) / 1000.f, 3,
           (rows == QUERY_CANCELED
@@ -1873,7 +1838,7 @@ public class Splink extends JFrame implements MessageHandler
         mConnection.prepareUpdate(queryLanguage, queryString).execute();
         messageHandler.handleMessage(STATUS, "seconds: %2.2f",
           (System.currentTimeMillis() - startTime) / 1000.f, 3);
-        messageHandler.handleMessage(SPLASH, "update processed");
+        resultsListener.onUpdate();
       }
       else
       {
@@ -1897,9 +1862,9 @@ public class Splink extends JFrame implements MessageHandler
   private void exportRepository(final RDFFormat format, final File file,
     boolean includeInferred, final AtomicReference<Boolean> exportHalt)
   {
-    QueryResultsProcessor exportQrp = new QueryResultsAdatper()
+    ResultsListener exportQrp = new ResultsAdatper()
     {
-      public int process(GraphQueryResult result)
+      public int onGraph(GraphQueryResult result)
         throws QueryEvaluationException
       {
         int count = 0;
@@ -2746,7 +2711,7 @@ public class Splink extends JFrame implements MessageHandler
 //      }
 //      catch (RepositoryException e1)
 //      {
-//        // TODO Auto-generated catch block
+//        // 
 //        e1.printStackTrace();
 //      }
 //      
