@@ -1,6 +1,8 @@
 package org.trebor.splink;
 
 import static java.lang.String.format;
+
+import static org.trebor.splink.MessageHandler.Type.*;
 import static org.trebor.splink.Splink.Property.RESULT_FONT;
 import static org.trebor.splink.Splink.Property.RESULT_FONT_CLR;
 import static org.trebor.splink.Splink.Property.TABLE_HEADER_BACKGROUND_CLR;
@@ -211,7 +213,7 @@ public class DefaultResultView extends JPanel implements View,
 
   public boolean onBoolean(boolean result, Splink splink)
   {
-    splink.setResultAreaMessage(150, format("%b", result).toUpperCase());
+    splink.handleMessage(SPLASH, format("%b", result).toUpperCase());
     return result;
   }
 }

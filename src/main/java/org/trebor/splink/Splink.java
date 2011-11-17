@@ -144,6 +144,7 @@ import org.openrdf.rio.RDFHandlerException;
 import org.openrdf.rio.RDFWriter;
 import org.openrdf.rio.Rio;
 
+import static org.trebor.splink.MessageHandler.Type.*;
 import static org.trebor.splink.Splink.Property.*;
 import static org.trebor.splink.Splink.AutoConnectBehavior.*;
 import static org.trebor.splink.Splink.ResourceType.*;
@@ -295,6 +296,8 @@ public class Splink extends JFrame implements MessageHandler
     RESULT_FONT("gui.result.font", Font.class, new Font("Courier", Font.BOLD, 15)),
     RESULT_FONT_CLR("gui.result.color", Color.class, Color.DARK_GRAY),
     RESULT_MESSAGE_CLR("gui.result.message-color", Color.class, Color.LIGHT_GRAY),
+    RESULT_WARN_CLR("gui.result.warn-color", Color.class, (new Color(0xFF, 0x49, 0x0)).brighter().brighter()),
+    RESULT_ERROR_CLR("gui.result.error-color", Color.class, Color.RED.brighter().brighter()),
     
     OPTION_SHOW_LONG_URI("option.show.longuri", Boolean.class, false),
     OPTION_SHOW_INFERRED("option.show.inferred", Boolean.class, true);
@@ -430,12 +433,12 @@ public class Splink extends JFrame implements MessageHandler
       if (null != e.getCause())
       {
         if (e.getCause() instanceof UnknownHostException)
-          setBigError(25, "Unknown host %s connecting to %s", host, url);
+          handleError(SPLASH, "Unknown host %s connecting to %s", host, url);
         else
-          setBigError(25, "%s to %s", e.getCause().getMessage(), url);
+          handleError(SPLASH, "%s to %s", e.getCause().getMessage(), url);
       }
       else
-        handleError(e, "Connecting to %s", url);
+        handleError(STATUS, e, "Connecting to %s", url);
     }
   }
 
@@ -534,13 +537,13 @@ public class Splink extends JFrame implements MessageHandler
 
       setTitle(format("%s (%d)", url, mConnection.size()));
 
-      setResultAreaMessage(80, repositoryName + " is ready!");
+      handleMessage(BOTH, repositoryName + " is ready!");
       if (null != warning) 
-        handleWarning(warning);
+        handleWarning(STATUS, warning);
     }
     catch (RepositoryException e)
     {
-      handleError(e);
+      handleError(BOTH, e);
     }
 
     return true;
@@ -636,7 +639,7 @@ public class Splink extends JFrame implements MessageHandler
   {
     try
     {
-      handleMessage("initializing %s namespace...", repositoryName);
+      handleMessage(STATUS, "initializing %s namespace...", repositoryName);
 
       // init name-space map and a buffer to build the query prefix string
 
@@ -695,11 +698,11 @@ public class Splink extends JFrame implements MessageHandler
         valueCol.setHeaderRenderer(mTableHeaderRenderer);
       }
 
-      handleMessage("initialized %s namespace.", repositoryName);
+      handleMessage(STATUS, "initialized %s namespace.", repositoryName);
     }
     catch (Exception e)
     {
-      handleError(e);
+      handleError(BOTH, e);
     }
   }
 
@@ -1351,21 +1354,6 @@ public class Splink extends JFrame implements MessageHandler
     updateEnabled();
   }
 
-  public void setResultAreaMessage(float size, String format, Object... args)
-  {
-    setResultAreaMessage(RESULT_MESSAGE_CLR.getColor(), size, format, args);
-  }
-  
-  public void setResultAreaMessage(Color color, float size, String format, Object... args)
-  {
-    JLabel resultComponent = new JLabel(format(format, args));
-    resultComponent.setFont(RESULT_FONT.getFont().deriveFont(size));
-    resultComponent.setForeground(color);
-    resultComponent.setVerticalAlignment(JLabel.CENTER);
-    resultComponent.setHorizontalAlignment(JLabel.CENTER);
-    setResultComponent(resultComponent);
-  }
-
   
   public void setResultView(View view)
   {
@@ -1550,7 +1538,7 @@ public class Splink extends JFrame implements MessageHandler
   {
     if (!isConnected())
     {
-      setBigError(50, "not connected");
+      handleError(SPLASH, "not connected");
       return;
     }
     
@@ -1730,7 +1718,7 @@ public class Splink extends JFrame implements MessageHandler
 
       public boolean process(boolean result)
       {
-        setResultAreaMessage(150, format("%b", result).toUpperCase());
+        handleMessage(SPLASH, format("%b", result).toUpperCase());
         return result;
       }
     };
@@ -1806,8 +1794,7 @@ public class Splink extends JFrame implements MessageHandler
           format("asking%s...", mQueryTimeout == NO_QUERY_TIMEOUT
             ? " (no timeout)"
             : " timeout " + mQueryTimeout + " seconds");
-        messageHandler.handleMessage(message);
-        setResultAreaMessage(50, message);
+        messageHandler.handleMessage(STATUS, message);
 
         BooleanQuery query =
           mConnection.prepareBooleanQuery(QueryLanguage.SPARQL, queryString);
@@ -1815,7 +1802,7 @@ public class Splink extends JFrame implements MessageHandler
         query.setIncludeInferred(includeInffered);
         boolean result = query.evaluate();
         resultProcessor.process(result);
-        messageHandler.handleMessage("seconds: %2.2f, result: %b",
+        messageHandler.handleMessage(STATUS, "seconds: %2.2f, result: %b",
           (System.currentTimeMillis() - startTime) / 1000.f, result);
       }
 
@@ -1830,8 +1817,7 @@ public class Splink extends JFrame implements MessageHandler
             mQueryTimeout == NO_QUERY_TIMEOUT
               ? " (no timeout)"
               : " timeout " + mQueryTimeout + " seconds");
-        messageHandler.handleMessage(message);
-        setResultAreaMessage(50, message);
+        messageHandler.handleMessage(STATUS, message);
 
         TupleQuery query =
           mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
@@ -1842,7 +1828,7 @@ public class Splink extends JFrame implements MessageHandler
         out.println("post query!");
         int rows = resultProcessor.process(result);
         int columns = result.getBindingNames().size();
-        messageHandler.handleMessage("seconds: %2.2f, cols: %d, rows: %s%s",
+        messageHandler.handleMessage(STATUS, "seconds: %2.2f, cols: %d, rows: %s%s",
           (System.currentTimeMillis() - startTime) / 1000.f, columns,
           (rows == QUERY_CANCELED
             ? "[canceled]"
@@ -1862,14 +1848,13 @@ public class Splink extends JFrame implements MessageHandler
             mQueryTimeout == NO_QUERY_TIMEOUT
               ? " (no timeout)"
               : " timeout " + mQueryTimeout + " seconds");
-        messageHandler.handleMessage(message);
-        setResultAreaMessage(50, message);
+        messageHandler.handleMessage(STATUS, message);
         GraphQuery query =
           mConnection.prepareGraphQuery(queryLanguage, queryString);
         query.setMaxQueryTime(mQueryTimeout);
         query.setIncludeInferred(includeInffered);
         int rows = resultProcessor.process(query.evaluate());
-        messageHandler.handleMessage("seconds: %2.2f, cols: %d, rows: %s%s",
+        messageHandler.handleMessage(STATUS, "seconds: %2.2f, cols: %d, rows: %s%s",
           (System.currentTimeMillis() - startTime) / 1000.f, 3,
           (rows == QUERY_CANCELED
             ? "[canceled]"
@@ -1883,28 +1868,28 @@ public class Splink extends JFrame implements MessageHandler
       else if (parsedOperation instanceof ParsedUpdate)
       {
         String message = format("updateing...");
-        messageHandler.handleMessage(message);
-        setResultAreaMessage(50, message);
+        messageHandler.handleMessage(BOTH, message);
+
         mConnection.prepareUpdate(queryLanguage, queryString).execute();
-        messageHandler.handleMessage("seconds: %2.2f",
+        messageHandler.handleMessage(STATUS, "seconds: %2.2f",
           (System.currentTimeMillis() - startTime) / 1000.f, 3);
-        setResultAreaMessage(50, "update processed");
+        messageHandler.handleMessage(SPLASH, "update processed");
       }
       else
       {
-        messageHandler.handleError("Unknown query type: " + parsedOperation);
+        messageHandler.handleError(BOTH, "Unknown query type: " + parsedOperation);
       }
     }
     catch (QueryInterruptedException qie)
     {
-      messageHandler.handleMessage(
+      messageHandler.handleMessage(STATUS, 
         "seconds: %2.2f, query reached timeout limit of %d seconds",
         (System.currentTimeMillis() - startTime) / 1000.f, mQueryTimeout);
-      setResultAreaMessage(50, "query timed out");
+      messageHandler.handleMessage(SPLASH, "query timed out");
     }
     catch (Exception e)
     {
-      messageHandler.handleError(e,
+      messageHandler.handleError(SPLASH, e,
         "------ query ------\n\n%s\n\n-------------------\n", queryString);
     }
   }
@@ -1920,14 +1905,14 @@ public class Splink extends JFrame implements MessageHandler
         int count = 0;
         try
         {
-          setResultAreaMessage(50, "writing %s...", file.getName());
+          handleMessage(BOTH, "writing %s...", file.getName());
           FileWriter writer = new FileWriter(file);
           count = writeGraph(format, result, writer, exportHalt);
-          setResultAreaMessage(50, count == QUERY_CANCELED ? "export canceled" : "exported %d triples", count);
+          handleMessage(BOTH, count == QUERY_CANCELED ? "export canceled" : "exported %d triples", count);
         }
         catch (IOException e)
         {
-          handleError(e);
+          handleError(SPLASH, e);
         }
         
         return count;
@@ -2282,11 +2267,11 @@ public class Splink extends JFrame implements MessageHandler
     }
     catch (QueryEvaluationException e)
     {
-      handleError(e);
+      handleError(BOTH, e);
     }
     catch (RDFHandlerException e)
     {
-      handleError(e);
+      handleError(BOTH, e);
     }
     
     return count;
@@ -2296,50 +2281,79 @@ public class Splink extends JFrame implements MessageHandler
   {
     out.format(message + "\n", args);
     if (null != mStatusBar)
-      setMessage(Color.BLUE, message, args);
+      setStatusMessage(Color.BLUE, message, args);
   }
   
-  public String handleError(Exception e, String format, Object... args)
+  public String handleMessage(Type type, String format, Object... args)
+  {
+    String result = null;
+    if (type.isSplash())
+      result = setSplashMessage(RESULT_MESSAGE_CLR.getColor(), format, args);
+    if (type.isStatus())
+      result = setStatusMessage(MESSAGE_CLR.getColor(), format, args);
+    return result;
+  }
+  
+  public String handleWarning(Type type, String format, Object... args)
+  {
+    String result = null;
+    if (type.isSplash())
+      result = setSplashMessage(RESULT_WARN_CLR.getColor(), format, args);
+    if (type.isStatus())
+      result = setStatusMessage(WARN_CLR.getColor(), format, args);
+    return result;
+  }
+
+  public String handleError(Type type, Exception e, String format, Object... args)
   {
     StringWriter writer = new StringWriter();
     PrintWriter pw = new PrintWriter(writer);
     e.printStackTrace(pw);
-    return handleError("%s\n%s", format(format, args), writer.getBuffer().toString());
+    return handleError(type, "%s\n%s", format(format, args), writer.getBuffer().toString());
   }
 
-  public String handleError(Exception e)
+  public String handleError(Type type, Exception e)
   {
-    return handleError(e, "");
+    return handleError(type, e, "");
   }
 
-  public String handleError(String format, Object... args)
+  public String handleError(Type type, String format, Object... args)
   {
     String errorString = format(format, args);
-    mErrorText.setText(errorString);
-    setResultComponent(mErrorText);
-    out.format(format, args);
-    setMessage(ERROR_CLR.getColor(), "Error!");
+    
+    if (type == BOTH)
+    {
+      mErrorText.setText(errorString);
+      setResultComponent(mErrorText);
+      setStatusMessage(ERROR_CLR.getColor(), errorString);
+    }
+    else if (type == SPLASH)
+    {
+      mErrorText.setText(errorString);
+      setResultComponent(mErrorText);
+      setStatusMessage(ERROR_CLR.getColor(), "Error!");
+    }
+    else if (type == STATUS)
+    {
+      setStatusMessage(ERROR_CLR.getColor(), errorString);
+    }
+    
     return errorString;
   }
-
-  public void setBigError(float size, String message, Object... args)
+  
+  public String setSplashMessage(Color color, String format, Object... args)
   {
-    setResultAreaMessage(ERROR_CLR.getColor(), size, message, args);
-    setMessage(ERROR_CLR.getColor(), "Error!");
+    String message = format(format, args);
+    JLabel resultComponent = new MaximumSizeTextArea(message);
+    resultComponent.setFont(MASTER_FONT.getFont());
+    resultComponent.setForeground(color);
+    resultComponent.setVerticalAlignment(JLabel.CENTER);
+    resultComponent.setHorizontalAlignment(JLabel.CENTER);
+    setResultComponent(resultComponent);
+    return message;
   }
   
-  
-  public String handleMessage(String format, Object... args)
-  {
-    return setMessage(MESSAGE_CLR.getColor(), format, args);
-  }
-  
-  public String handleWarning(String format, Object... args)
-  {
-    return setMessage(WARN_CLR.getColor(), "WARNING: " + format, args);
-  }
-  
-  public String setMessage(Color color, String format, Object... args)
+  public String setStatusMessage(Color color, String format, Object... args)
   {
     String fullMessage = String.format(format, args);
     if (null != mStatusBar)
@@ -2354,7 +2368,7 @@ public class Splink extends JFrame implements MessageHandler
     }
     else
       System.out.println(fullMessage);
-    
+
     return fullMessage;
   }  
   
@@ -2420,9 +2434,9 @@ public class Splink extends JFrame implements MessageHandler
     {
       mQueryLimit = mLimit;
       if (getLimit() == NO_QUERY_LIMIT)
-        handleMessage("query results size unlimited");
+        handleMessage(STATUS, "query results size unlimited");
       else
-        handleMessage("query results limited to %d rows", getLimit());
+        handleMessage(STATUS, "query results limited to %d rows", getLimit());
       updateEnabled();
     }
     
@@ -2450,9 +2464,9 @@ public class Splink extends JFrame implements MessageHandler
     {
       mQueryTimeout = mTimeout;
       if (getLimit() == NO_QUERY_TIMEOUT)
-        handleMessage("query execution time unlimited");
+        handleMessage(STATUS, "query execution time unlimited");
       else
-        handleMessage("query execution time limited to %d seconds", getLimit());
+        handleMessage(STATUS, "query execution time limited to %d seconds", getLimit());
       updateEnabled();
     }
     
@@ -2587,7 +2601,7 @@ public class Splink extends JFrame implements MessageHandler
       }
       catch (BadLocationException e1)
       {
-        handleError(e1);
+        handleError(BOTH, e1);
       }
     }
   };
@@ -2632,7 +2646,7 @@ public class Splink extends JFrame implements MessageHandler
       }
       catch (BadLocationException e1)
       {
-        handleError(e1);
+        handleError(BOTH, e1);
       }
     }
   };
