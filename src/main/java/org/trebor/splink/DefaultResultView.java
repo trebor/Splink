@@ -30,6 +30,8 @@ import org.openrdf.query.Binding;
 import org.openrdf.query.GraphQueryResult;
 import org.openrdf.query.QueryEvaluationException;
 import org.openrdf.query.TupleQueryResult;
+import org.openrdf.repository.Repository;
+import org.openrdf.repository.RepositoryConnection;
 
 @SuppressWarnings("serial")
 public class DefaultResultView extends JPanel implements View,
@@ -224,6 +226,18 @@ public class DefaultResultView extends JPanel implements View,
   }
 
   public MessageHandler getMessageHandler()
+  {
+    // TODO Auto-generated method stub
+    return null;
+  }
+
+  public Repository getRepository()
+  {
+    // TODO Auto-generated method stub
+    return null;
+  }
+
+  public RepositoryConnection getRepositoryConnection()
   {
     // TODO Auto-generated method stub
     return null;

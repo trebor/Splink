@@ -111,6 +111,7 @@ import javax.swing.text.Document;
 import javax.swing.text.PlainDocument;
 import javax.swing.undo.UndoManager;
 
+import org.apache.log4j.Logger;
 import org.openrdf.model.Namespace;
 import org.openrdf.model.Resource;
 import org.openrdf.model.Statement;
@@ -159,6 +160,8 @@ import static java.lang.Math.max;
 @SuppressWarnings("serial")
 public class Splink extends JFrame implements MessageHandler
 {
+  public static final Logger log = Logger.getLogger(Splink.class);
+  
   public static final String SYSTEM_REPO_NAME = "SYSTEM";
   public static final String RDF_PREFIX = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
   public static final String RDFS_PREFIX = "http://www.w3.org/2000/01/rdf-schema#";
@@ -449,8 +452,7 @@ public class Splink extends JFrame implements MessageHandler
     
     // get repo list
 
-    performQuery(SYSTEM_PREFIXES + QUERY_REPO_NAME_DESCRIPTION, 
-      false, false, this, new ResultsAdatper()
+    final ResultsListener resultsListener = new ResultsAdatper()
     {
       public int onTuple(TupleQueryResult result)
         throws QueryEvaluationException
@@ -491,7 +493,34 @@ public class Splink extends JFrame implements MessageHandler
 
         return mRepositoryList.size();
       }
-    }, null);
+    };
+
+    View queryView = new View()
+    {
+
+      public Component getViewComponent()
+      {
+       throw new UnsupportedOperationException();
+      }
+
+      public ResultsListener getResultsListener()
+      {
+        return resultsListener;
+      }
+
+      public MessageHandler getMessageHandler()
+      {
+        return Splink.this;
+      }
+
+      public RepositoryConnection getRepositoryConnection()
+      {
+        return mConnection;
+      }
+    };
+    
+    performQuery(SYSTEM_PREFIXES + QUERY_REPO_NAME_DESCRIPTION, 
+      false, mQueryLimit, mQueryTimeout, false, queryView);
     
     return true;
   }
@@ -1549,8 +1578,31 @@ public class Splink extends JFrame implements MessageHandler
         mPerformQuery.setEnabled(false);
         mPreviousQuery.setEnabled(false);
 
-        performQuery(fullQuery, mShowInferredCbmi.isSelected(), true,
-          Splink.this, mDefaultResultsProcessor, null);
+        View queryView = new View()
+        {
+          public Component getViewComponent()
+          {
+            return null;
+          }
+
+          public ResultsListener getResultsListener()
+          {
+            return mDefaultResultsProcessor;
+          }
+
+          public MessageHandler getMessageHandler()
+          {
+            return Splink.this;
+          }
+
+          public RepositoryConnection getRepositoryConnection()
+          {
+            return mConnection;
+          }
+        };
+        
+        performQuery(fullQuery, mShowInferredCbmi.isSelected(), 
+          mQueryLimit, mQueryTimeout, true, queryView);
 
         mPerformQuery.setEnabled(submitEnabled);
         mPreviousQuery.setEnabled(previousEnabled);
@@ -1688,10 +1740,14 @@ public class Splink extends JFrame implements MessageHandler
       }
     };
   
-  public void performQuery(String queryString, boolean includeInffered,
-    boolean limitResults, MessageHandler messageHandler,
-    ResultsListener resultsListener, AtomicReference<Boolean> queryHalt)
+  public static void performQuery(String queryString,
+    boolean includeInffered, int queryLimit, int queryTimeout,
+    boolean limitResults, View view)
   {
+    MessageHandler messageHandler = view.getMessageHandler();
+    ResultsListener resultsListener = view.getResultsListener();
+    RepositoryConnection mConnection = view.getRepositoryConnection();
+    
     long startTime = 0;
     try
     {
@@ -1724,7 +1780,7 @@ public class Splink extends JFrame implements MessageHandler
       // if there is a query limit, apply it
 
       final AtomicLong actualLimit = new AtomicLong(NO_QUERY_LIMIT);
-      if (limitResults && mQueryLimit != NO_QUERY_LIMIT &&
+      if (limitResults && queryLimit != NO_QUERY_LIMIT &&
         (parsedOperation instanceof ParsedTupleQuery))
       {
         final AtomicBoolean hasLimit = new AtomicBoolean(false);
@@ -1740,12 +1796,12 @@ public class Splink extends JFrame implements MessageHandler
 
         if (!hasLimit.get())
         {
-          queryString += "\nLIMIT " + mQueryLimit;
-          actualLimit.set(mQueryLimit);
+          queryString += "\nLIMIT " + queryLimit;
+          actualLimit.set(queryLimit);
         }
       }
 
-      debugMessage(queryString);
+      log.debug(queryString);
 
       // register start time of expression
 
@@ -1756,14 +1812,14 @@ public class Splink extends JFrame implements MessageHandler
       if (parsedOperation instanceof ParsedBooleanQuery)
       {
         String message =
-          format("asking%s...", mQueryTimeout == NO_QUERY_TIMEOUT
+          format("asking%s...", queryTimeout == NO_QUERY_TIMEOUT
             ? " (no timeout)"
-            : " timeout " + mQueryTimeout + " seconds");
+            : " timeout " + queryTimeout + " seconds");
         messageHandler.handleMessage(STATUS, message);
 
         BooleanQuery query =
           mConnection.prepareBooleanQuery(QueryLanguage.SPARQL, queryString);
-        query.setMaxQueryTime(mQueryTimeout);
+        query.setMaxQueryTime(queryTimeout);
         query.setIncludeInferred(includeInffered);
         boolean result = query.evaluate();
         resultsListener.onBoolean(result);
@@ -1779,21 +1835,22 @@ public class Splink extends JFrame implements MessageHandler
           format("querying%s%s...", actualLimit.get() == NO_QUERY_LIMIT
             ? " (no limit)"
             : " with limit " + actualLimit.get(),
-            mQueryTimeout == NO_QUERY_TIMEOUT
+            queryTimeout == NO_QUERY_TIMEOUT
               ? " (no timeout)"
-              : " timeout " + mQueryTimeout + " seconds");
+              : " timeout " + queryTimeout + " seconds");
         messageHandler.handleMessage(STATUS, message);
 
         TupleQuery query =
           mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
-        query.setMaxQueryTime(mQueryTimeout);
+        query.setMaxQueryTime(queryTimeout);
         query.setIncludeInferred(includeInffered);
         out.println("pre query!");
         TupleQueryResult result = query.evaluate();
         out.println("post query!");
         int rows = resultsListener.onTuple(result);
         int columns = result.getBindingNames().size();
-        messageHandler.handleMessage(STATUS, "seconds: %2.2f, cols: %d, rows: %s%s",
+        messageHandler.handleMessage(STATUS,
+          "seconds: %2.2f, cols: %d, rows: %s%s",
           (System.currentTimeMillis() - startTime) / 1000.f, columns,
           (rows == QUERY_CANCELED
             ? "[canceled]"
@@ -1810,16 +1867,17 @@ public class Splink extends JFrame implements MessageHandler
           format("describing%s%s...", actualLimit.get() == NO_QUERY_LIMIT
             ? " (no limit)"
             : " with limit " + actualLimit.get(),
-            mQueryTimeout == NO_QUERY_TIMEOUT
+            queryTimeout == NO_QUERY_TIMEOUT
               ? " (no timeout)"
-              : " timeout " + mQueryTimeout + " seconds");
+              : " timeout " + queryTimeout + " seconds");
         messageHandler.handleMessage(STATUS, message);
         GraphQuery query =
           mConnection.prepareGraphQuery(queryLanguage, queryString);
-        query.setMaxQueryTime(mQueryTimeout);
+        query.setMaxQueryTime(queryTimeout);
         query.setIncludeInferred(includeInffered);
         int rows = resultsListener.onGraph(query.evaluate());
-        messageHandler.handleMessage(STATUS, "seconds: %2.2f, cols: %d, rows: %s%s",
+        messageHandler.handleMessage(STATUS,
+          "seconds: %2.2f, cols: %d, rows: %s%s",
           (System.currentTimeMillis() - startTime) / 1000.f, 3,
           (rows == QUERY_CANCELED
             ? "[canceled]"
@@ -1842,14 +1900,15 @@ public class Splink extends JFrame implements MessageHandler
       }
       else
       {
-        messageHandler.handleError(BOTH, "Unknown query type: " + parsedOperation);
+        messageHandler.handleError(BOTH, "Unknown query type: " +
+          parsedOperation);
       }
     }
     catch (QueryInterruptedException qie)
     {
-      messageHandler.handleMessage(STATUS, 
+      messageHandler.handleMessage(STATUS,
         "seconds: %2.2f, query reached timeout limit of %d seconds",
-        (System.currentTimeMillis() - startTime) / 1000.f, mQueryTimeout);
+        (System.currentTimeMillis() - startTime) / 1000.f, queryTimeout);
       messageHandler.handleMessage(SPLASH, "query timed out");
     }
     catch (Exception e)
@@ -1860,9 +1919,9 @@ public class Splink extends JFrame implements MessageHandler
   }
 
   private void exportRepository(final RDFFormat format, final File file,
-    boolean includeInferred, final AtomicReference<Boolean> exportHalt)
+    boolean includeInferred)
   {
-    ResultsListener exportQrp = new ResultsAdatper()
+    final ResultsListener exportQrp = new ResultsAdatper()
     {
       public int onGraph(GraphQueryResult result)
         throws QueryEvaluationException
@@ -1872,19 +1931,47 @@ public class Splink extends JFrame implements MessageHandler
         {
           handleMessage(BOTH, "writing %s...", file.getName());
           FileWriter writer = new FileWriter(file);
-          count = writeGraph(format, result, writer, exportHalt);
-          handleMessage(BOTH, count == QUERY_CANCELED ? "export canceled" : "exported %d triples", count);
+          count = writeGraph(format, result, writer);
+          handleMessage(BOTH, count == QUERY_CANCELED
+            ? "export canceled"
+            : "exported %d triples", count);
         }
         catch (IOException e)
         {
           handleError(SPLASH, e);
         }
-        
+
         return count;
       }
     };
 
-    performQuery(mQueryPrefixString + QUERY_FOR_EXPORT, includeInferred, false, this, exportQrp, exportHalt);
+    View queryView = new View()
+    {
+
+      public Component getViewComponent()
+      {
+        throw new UnsupportedOperationException();
+      }
+
+      public ResultsListener getResultsListener()
+      {
+        return exportQrp;
+      }
+
+      public MessageHandler getMessageHandler()
+      {
+        return Splink.this;
+      }
+
+      public RepositoryConnection getRepositoryConnection()
+      {
+        return mConnection;
+      }
+
+    };
+
+    performQuery(mQueryPrefixString + QUERY_FOR_EXPORT, includeInferred,
+      mQueryLimit, mQueryTimeout, false, queryView);
   }
   
   private void showRepositoryExportDialog()
@@ -1911,7 +1998,6 @@ public class Splink extends JFrame implements MessageHandler
     ActionListener listener = new ActionListener()
     {
       Thread exportThread = null;
-      AtomicReference<Boolean> exportThreadHalt = new AtomicReference<Boolean>(false);
       
       public void actionPerformed(ActionEvent e)
       {
@@ -1961,7 +2047,7 @@ public class Splink extends JFrame implements MessageHandler
             {
               public void run()
               {
-                exportRepository(format, file, inferred.isSelected(), exportThreadHalt);
+                exportRepository(format, file, inferred.isSelected());
                 dialog.setVisible(false);
               }
             };
@@ -1972,7 +2058,6 @@ public class Splink extends JFrame implements MessageHandler
         {
           if (null != exportThread)
           {
-            exportThreadHalt.set(true);
             exportThread = null;
           }
           
@@ -2205,7 +2290,7 @@ public class Splink extends JFrame implements MessageHandler
     dialog.setVisible(true);
   }
 
-  private int writeGraph(RDFFormat format, GraphQueryResult result, Writer writer, AtomicReference<Boolean> exportHalt)
+  private int writeGraph(RDFFormat format, GraphQueryResult result, Writer writer)
   {
     int count = 0;
     
@@ -2218,8 +2303,6 @@ public class Splink extends JFrame implements MessageHandler
       for (String prefix: nameSpace.keySet())
       {
         rdfWriter.handleNamespace(prefix, nameSpace.get(prefix));
-        if (exportHalt.get())
-          return QUERY_CANCELED;
       }
       
       while (result.hasNext())
