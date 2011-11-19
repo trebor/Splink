@@ -47,14 +47,12 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Stack;
 import java.util.Vector;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -114,9 +112,7 @@ import javax.swing.undo.UndoManager;
 import org.apache.log4j.Logger;
 import org.openrdf.model.Namespace;
 import org.openrdf.model.Resource;
-import org.openrdf.model.Statement;
 import org.openrdf.model.URI;
-import org.openrdf.query.Binding;
 import org.openrdf.query.BindingSet;
 import org.openrdf.query.BooleanQuery;
 import org.openrdf.query.GraphQuery;
@@ -188,10 +184,12 @@ public class Splink extends JFrame implements MessageHandler
   private int mQueryLimit;
   private int mQueryTimeout;
   private UndoManager mCurrentUndoManagaer;
+  private ResultsListener mResultsListener;
   private Properties mProperties;
   private JScrollPane mPrefixScroll;
   private JScrollPane mContextScroll;
   private JTabbedPane mEditorTab;
+  private JTabbedPane mResultTab;
   private JTable mPrefix;
   private JTable mContext;
   private JScrollPane mResultArea;
@@ -497,10 +495,9 @@ public class Splink extends JFrame implements MessageHandler
 
     View queryView = new View()
     {
-
       public Component getViewComponent()
       {
-       throw new UnsupportedOperationException();
+        throw new UnsupportedOperationException();
       }
 
       public ResultsListener getResultsListener()
@@ -519,7 +516,7 @@ public class Splink extends JFrame implements MessageHandler
       }
     };
     
-    performQuery(SYSTEM_PREFIXES + QUERY_REPO_NAME_DESCRIPTION, 
+    performQuery(SYSTEM_PREFIXES + QUERY_REPO_NAME_DESCRIPTION,
       false, mQueryLimit, mQueryTimeout, false, queryView);
     
     return true;
@@ -994,6 +991,8 @@ public class Splink extends JFrame implements MessageHandler
   
   private void constructResultTable()
   {
+    mResultTab = new JTabbedPane();
+    
     // create result table
 
     mResult = new JTable()
@@ -1003,16 +1002,14 @@ public class Splink extends JFrame implements MessageHandler
         return mResultTableRenderer;
       }
     };
+    
+    mResultsListener = new DefaultResultsListener(this, mResult, mTableHeaderRenderer);
 
     mResult.setFont(RESULT_FONT.getFont());
     mResult.setForeground(RESULT_FONT_CLR.getColor());
     mResult.setSelectionForeground(RESULT_FONT_CLR.getColor());
     mResult.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
-    
-//  table.getSelectionModel().setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
-//  table.setSelectionMode(ListSelectionModel.SINGLE_INTERVAL_SELECTION);
-//  table.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
-    
+
     // look for popup menu mouse events
     
     mResult.addMouseListener(new PopupListener(mResult));
@@ -1114,6 +1111,7 @@ public class Splink extends JFrame implements MessageHandler
 
     mResultArea = new JScrollPane(mResult);
     mResultArea.setPreferredSize(RESULT_SIZE.getDimension());
+    mResultTab.addTab("name", mResultArea);
     
     JSplitPane contextPrefixSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, mContextScroll, mPrefixScroll);
     contextPrefixSplit.setBorder(null);
@@ -1121,7 +1119,7 @@ public class Splink extends JFrame implements MessageHandler
     JSplitPane topSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, mEditorTab, contextPrefixSplit);
     topSplit.setBorder(null);
     
-    JSplitPane masterSplit =new JSplitPane(JSplitPane.VERTICAL_SPLIT, topSplit, mResultArea);
+    JSplitPane masterSplit =new JSplitPane(JSplitPane.VERTICAL_SPLIT, topSplit, mResultTab);
     masterSplit.setBorder(null);
     
     frame.add(masterSplit, BorderLayout.CENTER);
@@ -1297,6 +1295,20 @@ public class Splink extends JFrame implements MessageHandler
         inspectContext(target.getModel().getValueAt(row, 0).toString());
     }
   }
+
+//  private View createView()
+//  {
+//    View view = new DefaultView(this);
+//    addResultTab(getCurrentEditor().getName(), view.getViewComponent());
+//    return view;
+//  }
+  
+//  private void addResultTab(String name, Component result)
+//  {
+//    mResultTab.addTab(name, result);
+//    if (mResultTab.getTabCount() > 5)
+//      mResultTab.removeTabAt(0);
+//  }
   
   private void addEditor(String name, String query)
   {
@@ -1373,12 +1385,11 @@ public class Splink extends JFrame implements MessageHandler
     updateEnabled();
   }
 
-  
-  public void setResultView(View view)
-  {
-    mResultsHandler = view.getResultsListener();
-    setResultComponent(view.getViewComponent());
-  }
+//  public void setResultView(View view)
+//  {
+//    mResultsHandler = view.getResultsListener();
+//    setResultComponent(view.getViewComponent());
+//  }
   
   public void setResultComponent(Component c)
   {
@@ -1587,7 +1598,7 @@ public class Splink extends JFrame implements MessageHandler
 
           public ResultsListener getResultsListener()
           {
-            return mDefaultResultsProcessor;
+            return mResultsListener;
           }
 
           public MessageHandler getMessageHandler()
@@ -1616,130 +1627,12 @@ public class Splink extends JFrame implements MessageHandler
     return metrics.stringWidth(" " + string);
   }
 
-  @SuppressWarnings("unused")
-  private ResultsListener mResultsHandler;
+  public boolean showLongUri()
+  {
+    return mShowLongUriCbmi.getState();
+  }
   
-  private ResultsListener mDefaultResultsProcessor =
-    new ResultsListener()
-    {
-      public int onTuple(TupleQueryResult result)
-        throws QueryEvaluationException
-      {
-        // create the table model
-
-        DefaultTableModel tm = new DefaultTableModel()
-        {
-          public boolean isCellEditable(int row, int column)
-          {
-            return false;
-          }
-        };
-
-        // add columnds to table
-
-        Map<String, Integer> columnMap = new HashMap<String, Integer>();
-        for (String binding : result.getBindingNames())
-        {
-          columnMap.put(binding, tm.getColumnCount());
-          tm.addColumn(binding);
-        }
-
-        // populate the table
-
-        while (result.hasNext())
-        {
-          String[] row = new String[columnMap.size()];
-          Iterator<Binding> rowData = result.next().iterator();
-          while (rowData.hasNext())
-          {
-            Binding rowBinding = rowData.next();
-            String binding = rowBinding.getName();
-            String uri = rowBinding.getValue().toString();
-            if (!mShowLongUriCbmi.getState())
-              uri = shortUri(uri);
-            row[columnMap.get(binding)] = uri;
-          }
-
-          tm.addRow(row);
-        }
-
-        // update the display
-
-        mResult.setModel(tm);
-        TableColumnModel columnModel = mResult.getColumnModel();
-        for (int i = 0; i < tm.getColumnCount(); ++i)
-          columnModel.getColumn(i).setHeaderRenderer(mTableHeaderRenderer);
-        setResultComponent(mResult);
-
-        // return row count
-
-        return tm.getRowCount();
-      }
-      
-      public int onGraph(GraphQueryResult result)
-        throws QueryEvaluationException
-      {
-        // create the table model
-
-        DefaultTableModel tm = new DefaultTableModel()
-        {
-          public boolean isCellEditable(int row, int column)
-          {
-            return false;
-          }
-        };
-
-        // add columns
-
-        for (String name : new String[]{"subject", "predicate", "object"}) 
-          tm.addColumn(name);
-
-        // populate the table
-
-        while (result.hasNext())
-        {
-          Vector<String> row = new Vector<String>();
-          Statement rowData = result.next();
-          if (mShowLongUriCbmi.getState())
-          {
-            row.add(rowData.getSubject().toString());
-            row.add(rowData.getPredicate().toString());
-            row.add(rowData.getObject().toString());
-          }
-          else
-          {
-            row.add(shortUri(rowData.getSubject().toString()));
-            row.add(shortUri(rowData.getPredicate().toString()));
-            row.add(shortUri(rowData.getObject().toString()));
-          }
-
-          tm.addRow(row);
-        }
-
-        // update the display
-
-        mResult.setModel(tm);
-        for (int i = 0; i < tm.getColumnCount(); ++i)
-          mResult.getColumnModel().getColumn(i).setHeaderRenderer(mTableHeaderRenderer);
-        setResultComponent(mResult);
-
-        // return row count
-
-        return tm.getRowCount();
-      }
-
-      public boolean onBoolean(boolean result)
-      {
-        handleMessage(SPLASH, format("%b", result).toUpperCase());
-        return result;
-      }
-      
-      public void onUpdate()
-      {
-        handleMessage(SPLASH, "update performed");
-      }
-    };
-  
+    
   public static void performQuery(String queryString,
     boolean includeInffered, int queryLimit, int queryTimeout,
     boolean limitResults, View view)
@@ -1747,7 +1640,7 @@ public class Splink extends JFrame implements MessageHandler
     MessageHandler messageHandler = view.getMessageHandler();
     ResultsListener resultsListener = view.getResultsListener();
     RepositoryConnection mConnection = view.getRepositoryConnection();
-    
+
     long startTime = 0;
     try
     {
@@ -2909,6 +2802,11 @@ public class Splink extends JFrame implements MessageHandler
     }
     
     EDITOR_CURRENT_QUERY.set(mEditorTab.getSelectedIndex());
+  }
+
+  public RepositoryConnection getConnection()
+  {
+    return mConnection;
   }
 }
 
