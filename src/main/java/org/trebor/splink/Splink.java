@@ -112,7 +112,6 @@ import javax.swing.undo.UndoManager;
 import org.apache.log4j.Logger;
 import org.openrdf.model.Namespace;
 import org.openrdf.model.Resource;
-import org.openrdf.model.URI;
 import org.openrdf.query.BindingSet;
 import org.openrdf.query.BooleanQuery;
 import org.openrdf.query.GraphQuery;
@@ -140,11 +139,13 @@ import org.openrdf.rio.RDFFormat;
 import org.openrdf.rio.RDFHandlerException;
 import org.openrdf.rio.RDFWriter;
 import org.openrdf.rio.Rio;
+import org.trebor.splink.ResourceManager.ResourceType;
 
 import static org.trebor.splink.MessageHandler.Type.*;
 import static org.trebor.splink.Splink.Property.*;
 import static org.trebor.splink.Splink.AutoConnectBehavior.*;
-import static org.trebor.splink.Splink.ResourceType.*;
+import static org.trebor.splink.ResourceManager.*;
+import static org.trebor.splink.ResourceManager.ResourceType.*;
 import static javax.swing.GroupLayout.Alignment.*;
 import static javax.swing.KeyStroke.getKeyStroke;
 import static java.awt.event.InputEvent.CTRL_MASK;
@@ -170,12 +171,6 @@ public class Splink extends JFrame implements MessageHandler
   public static final String PROPERTIES_FILE = System.getProperty("user.home") + File.separator + ".splink";
   public static final String QUERY_NAME_KEY_BASE = "query.name.";
   public static final String QUERY_VALUE_KEY_BASE = "query.value.";
-  public static final String URI_IDENTIFIER_RE = "[a-zA-Z_0-9\\.\\-]*";
-  public static final String PROTOCOL_IDENTIFIER_RE = "\\w*";
-  public static final String SHORT_URI_RE = format("%s(?<!_):%s", URI_IDENTIFIER_RE, URI_IDENTIFIER_RE);
-  public static final String LONG_URI_RE = format("%s://.*", PROTOCOL_IDENTIFIER_RE);
-  public static final String LITERAL_RE = format("\"(\\p{ASCII}*)\"((@|\\^\\^)(%s|%s|<%s>))?", URI_IDENTIFIER_RE, SHORT_URI_RE, LONG_URI_RE);
-  public static final String BLANK_NODE_RE = format("_:%s", URI_IDENTIFIER_RE);
   public static final int NO_QUERY_LIMIT = Integer.MIN_VALUE;
   public static final int NO_QUERY_TIMEOUT = -1;
   public static final int QUERY_CANCELED = Integer.MIN_VALUE + 1;
@@ -215,42 +210,6 @@ public class Splink extends JFrame implements MessageHandler
   private int mPopupTableColumn;
   private Map<JEditorPane, UndoManager> mEditorUndoManagerMap;
   private StringBuffer mKillRing = new StringBuffer();
-  
-  enum ResourceType
-  {    
-    SHORT_URI("^" + SHORT_URI_RE + "$"),
-    LONG_URI("^" + LONG_URI_RE + "$"),
-    BLANK_NODE("^" + BLANK_NODE_RE + "$"),
-    LITERAL(LITERAL_RE);
-    
-    private final Pattern mPattern;
-    
-    ResourceType(String regex)
-    {
-      mPattern = Pattern.compile(regex);
-    }
-    
-    public boolean isMatch(String uri)
-    {
-      return mPattern.matcher(uri).matches();
-    }
-    
-    static ResourceType establishType(String uri)
-    {
-      for (ResourceType type: values())
-        if (type.isMatch(uri))
-          return type;
-      
-      return null;
-    }
-    
-    public Matcher parse(String resource)
-    {
-      Matcher matcher = mPattern.matcher(resource);
-      matcher.matches();
-      return matcher;
-    }
-  }
   
   enum Property
   {
@@ -625,7 +584,7 @@ public class Splink extends JFrame implements MessageHandler
             String contextUri = context.next().toString();
 
             if (!mShowLongUriCbmi.getState())
-              contextUri = shortUri(contextUri);
+              contextUri = ResourceManager.shrinkResource(mConnection, contextUri);
 
             contextTable.addRow(new String[]
             {
@@ -686,7 +645,7 @@ public class Splink extends JFrame implements MessageHandler
         mPrefixRegex.put(
           nameSpace.getName(),
           Pattern.compile(String.format("^%s(%s)$",
-            Pattern.quote(nameSpace.getName()), Splink.URI_IDENTIFIER_RE)));
+            Pattern.quote(nameSpace.getName()), URI_IDENTIFIER_RE)));
         prefixTable.addRow(new String[]
         {
           nameSpace.getPrefix(), nameSpace.getName()
@@ -745,30 +704,6 @@ public class Splink extends JFrame implements MessageHandler
   public boolean showShortUris()
   {
     return !mShowLongUriCbmi.getState();
-  }
-  
-  public String shortUri(String longUri)
-  {
-    if (LONG_URI.isMatch(longUri))
-    {
-      URI uri = mConnection.getValueFactory().createURI(longUri);
-      String prefix = mNameSpaceMap.get(uri.getNamespace());
-      return null != prefix ? prefix + uri.getLocalName() : longUri;
-    }
-    
-    return longUri;
-  }
-
-  public String longUri(String shortUri)
-  {
-    for (String name: mNameSpaceMap.keySet())
-    {
-      String perfix = mNameSpaceMap.get(name);
-      if (shortUri.startsWith(perfix))
-        return shortUri.replace(perfix, name);
-    }
-    
-    return shortUri;
   }
   
   // add prefix table renderer
@@ -1737,9 +1672,7 @@ public class Splink extends JFrame implements MessageHandler
           mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
         query.setMaxQueryTime(queryTimeout);
         query.setIncludeInferred(includeInffered);
-        out.println("pre query!");
         TupleQueryResult result = query.evaluate();
-        out.println("post query!");
         int rows = resultsListener.onTuple(result);
         int columns = result.getBindingNames().size();
         messageHandler.handleMessage(STATUS,
@@ -2365,7 +2298,7 @@ public class Splink extends JFrame implements MessageHandler
     {
       super(limit == NO_QUERY_LIMIT
         ? "Unlimited"
-        : "Limit " + limit, key, limit == NO_QUERY_LIMIT
+        : format("Limit %,d", limit), key, limit == NO_QUERY_LIMIT
         ? "return an unlimited number of rows"
         : "limit query results to " + limit + " rows");
       mLimit = limit;
@@ -2395,9 +2328,12 @@ public class Splink extends JFrame implements MessageHandler
     {
       super(timeout == NO_QUERY_TIMEOUT
         ? "Untimed"
-        : timeout + " Seconds", key, timeout == NO_QUERY_TIMEOUT
-        ? "execute query potentially forever"
-        : "execute query for no more then " + timeout + " seconds");
+        : (timeout / 60f < 1
+          ? format("%02d Seconds", timeout)
+          : format("%02d Minutes", timeout / 60)), key,
+        timeout == NO_QUERY_TIMEOUT
+          ? "execute query potentially forever"
+          : "execute query for no more then " + timeout + " seconds");
       mTimeout = timeout;
     }
 
@@ -2433,14 +2369,14 @@ public class Splink extends JFrame implements MessageHandler
   private QueryTimeoutAction [] mQueryTimeoutActions =
   {
     new QueryTimeoutAction(NO_QUERY_TIMEOUT, getKeyStroke(VK_0, CTRL_MASK)),
-    new QueryTimeoutAction(10, getKeyStroke(VK_1, CTRL_MASK)),
-    new QueryTimeoutAction(20, getKeyStroke(VK_2, CTRL_MASK)),
-    new QueryTimeoutAction(30, getKeyStroke(VK_3, CTRL_MASK)),
-    new QueryTimeoutAction(40, getKeyStroke(VK_4, CTRL_MASK)),
-    new QueryTimeoutAction(50, getKeyStroke(VK_5, CTRL_MASK)),
-    new QueryTimeoutAction(60, getKeyStroke(VK_6, CTRL_MASK)),
-    new QueryTimeoutAction(70, getKeyStroke(VK_7, CTRL_MASK)),
-    new QueryTimeoutAction(80, getKeyStroke(VK_8, CTRL_MASK)),
+    new QueryTimeoutAction(  5, getKeyStroke(VK_1, CTRL_MASK)),
+    new QueryTimeoutAction( 15, getKeyStroke(VK_2, CTRL_MASK)),
+    new QueryTimeoutAction( 30, getKeyStroke(VK_3, CTRL_MASK)),
+    new QueryTimeoutAction( 60, getKeyStroke(VK_4, CTRL_MASK)),
+    new QueryTimeoutAction(120, getKeyStroke(VK_5, CTRL_MASK)),
+    new QueryTimeoutAction(240, getKeyStroke(VK_6, CTRL_MASK)),
+    new QueryTimeoutAction(480, getKeyStroke(VK_7, CTRL_MASK)),
+    new QueryTimeoutAction(960, getKeyStroke(VK_8, CTRL_MASK)),
   };
   
   

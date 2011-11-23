@@ -28,7 +28,7 @@ public class TestMaximumSizeTextArea
     {
       public void actionPerformed(ActionEvent arg0)
       {
-        msta.setText("foo\n" + msta.getOriginalText() + "\nmore!");
+        msta.setText("foo\n" + msta.getOriginalText() + String.format("\n%,d", 10000) + "\nmore?");
       }
     });
     

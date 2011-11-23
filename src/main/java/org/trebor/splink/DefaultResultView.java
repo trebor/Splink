@@ -140,7 +140,7 @@ public class DefaultResultView extends JPanel implements View,
         String binding = rowBinding.getName();
         String uri = rowBinding.getValue().toString();
         if (!mSplink.showShortUris())
-          uri = mSplink.shortUri(uri);
+          uri = ResourceManager.shrinkResource(mSplink.getConnection(), uri);
         row[columnMap.get(binding)] = uri;
       }
 
@@ -186,18 +186,9 @@ public class DefaultResultView extends JPanel implements View,
     {
       Vector<String> row = new Vector<String>();
       Statement rowData = result.next();
-      if (!mSplink.showShortUris())
-      {
-        row.add(rowData.getSubject().toString());
-        row.add(rowData.getPredicate().toString());
-        row.add(rowData.getObject().toString());
-      }
-      else
-      {
-        row.add(mSplink.shortUri(rowData.getSubject().toString()));
-        row.add(mSplink.shortUri(rowData.getPredicate().toString()));
-        row.add(mSplink.shortUri(rowData.getObject().toString()));
-      }
+      row.add(adjustResource(rowData.getSubject().toString()));
+      row.add(adjustResource(rowData.getPredicate().toString()));
+      row.add(adjustResource(rowData.getObject().toString()));
 
       tm.addRow(row);
     }
@@ -213,6 +204,13 @@ public class DefaultResultView extends JPanel implements View,
     // return row count
 
     return tm.getRowCount();
+  }
+
+  public String adjustResource(String resource)
+  {
+    return mSplink.showLongUri()
+      ? resource
+      : ResourceManager.shrinkResource(mSplink.getConnection(), resource);
   }
 
   public boolean onBoolean(boolean result)

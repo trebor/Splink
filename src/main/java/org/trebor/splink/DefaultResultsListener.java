@@ -65,9 +65,7 @@ public class DefaultResultsListener implements ResultsListener
       {
         Binding rowBinding = rowData.next();
         String binding = rowBinding.getName();
-        String uri = rowBinding.getValue().toString();
-        if (!mSplink.showLongUri())
-          uri = mSplink.shortUri(uri);
+        String uri = adjustResource(rowBinding.getValue().toString());
         row[columnMap.get(binding)] = uri;
       }
 
@@ -87,8 +85,14 @@ public class DefaultResultsListener implements ResultsListener
     return tm.getRowCount();
   }
 
-  public int onGraph(GraphQueryResult result)
-    throws QueryEvaluationException
+  public String adjustResource(String resource)
+  {
+    return mSplink.showLongUri()
+      ? resource
+      : ResourceManager.shrinkResource(mSplink.getConnection(), resource);
+  }
+  
+  public int onGraph(GraphQueryResult result) throws QueryEvaluationException
   {
     // create the table model
 
@@ -115,19 +119,9 @@ public class DefaultResultsListener implements ResultsListener
     {
       Vector<String> row = new Vector<String>();
       Statement rowData = result.next();
-      if (mSplink.showLongUri())
-      {
-        row.add(rowData.getSubject().toString());
-        row.add(rowData.getPredicate().toString());
-        row.add(rowData.getObject().toString());
-      }
-      else
-      {
-        row.add(mSplink.shortUri(rowData.getSubject().toString()));
-        row.add(mSplink.shortUri(rowData.getPredicate().toString()));
-        row.add(mSplink.shortUri(rowData.getObject().toString()));
-      }
-
+      row.add(adjustResource(rowData.getSubject().toString()));
+      row.add(adjustResource(rowData.getPredicate().toString()));
+      row.add(adjustResource(rowData.getObject().toString()));
       tm.addRow(row);
     }
 
