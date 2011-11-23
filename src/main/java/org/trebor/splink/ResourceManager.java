@@ -18,17 +18,18 @@ public class ResourceManager
   public static final int LITERAL_STRING_INDEX = 1;
   public static final int LITERAL_SEPERATOR_INDEX = 2;
   public static final int LITERAL_TYPE_INDEX = 3;
-  public static final String URI_IDENTIFIER_RE = "[/#a-zA-Z_0-9\\.\\-]*";
+  public static final String URI_IDENTIFIER_RE = "[a-zA-Z_0-9\\.\\-]*";
+  public static final String URI_BODY_RE = "[#/a-zA-Z_0-9\\.\\-]*";
   public static final String PROTOCOL_IDENTIFIER_RE = "\\w*";
   public static final String SHORT_URI_RE = format("%s(?<!_):%s", URI_IDENTIFIER_RE, URI_IDENTIFIER_RE);
-  public static final String LONG_URI_RE = format("%s://%s", PROTOCOL_IDENTIFIER_RE, URI_IDENTIFIER_RE);
+  public static final String LONG_URI_RE = format("%s://%s", PROTOCOL_IDENTIFIER_RE, URI_BODY_RE);
   public static final String LITERAL_RE = format("\"(\\p{ASCII}*)\"(@|\\^\\^)?<?(%s|%s|%s)?>?", LONG_URI_RE, SHORT_URI_RE, URI_IDENTIFIER_RE);
   public static final String BLANK_NODE_RE = format("_:%s", URI_IDENTIFIER_RE);
 
   public enum ResourceType
   {    
-    LONG_URI("^" + LONG_URI_RE + "$"),
     SHORT_URI("^" + SHORT_URI_RE + "$"),
+    LONG_URI("^" + LONG_URI_RE + "$"),
     BLANK_NODE("^" + BLANK_NODE_RE + "$"),
     LITERAL(LITERAL_RE);
     

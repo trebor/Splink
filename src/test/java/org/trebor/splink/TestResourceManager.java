@@ -15,7 +15,7 @@ import org.trebor.splink.ResourceManager.ResourceType;
 public class TestResourceManager
 {
   public static final Logger log = Logger.getLogger(ResourceManager.class);
-  
+
   class Resource
   {
     String mForm1;
@@ -50,15 +50,14 @@ public class TestResourceManager
       new Resource("\"hello fred\"@en", null, LITERAL),
       new Resource("\"hello fred\"@en_gb", null, LITERAL),
       new Resource("\"hello \"there\" fred\"@en_gb", null, LITERAL),
-      new Resource(
-        "\"555\"^^xsd:int",
+      new Resource("\"555\"^^xsd:int",
         "\"555\"^^<http://www.w3.org/2001/XMLSchema#int>", LITERAL),
       new Resource(
-        "\"1986-02-11T00:00:00-04:00\"^^xsd:dateTime", 
+        "\"1986-02-11T00:00:00-04:00\"^^xsd:dateTime",
         "\"1986-02-11T00:00:00-04:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
         LITERAL),
       new Resource(
-        "\"1996-05-14T13:33:12-04:00\"^^xsd:dateTime", 
+        "\"1996-05-14T13:33:12-04:00\"^^xsd:dateTime",
         "\"1996-05-14T13:33:12-04:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>",
         LITERAL),
       new Resource("\"foo\nbar\"", null, LITERAL),
@@ -74,6 +73,7 @@ public class TestResourceManager
 
     for (Resource resource : mResources)
     {
+      log.debug("resource: " + resource.mForm1);
       assertEquals(resource.mType,
         ResourceType.establishType(resource.mForm1));
       switch (resource.mType)
