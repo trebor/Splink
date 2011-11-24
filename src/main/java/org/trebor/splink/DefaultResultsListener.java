@@ -13,21 +13,27 @@ import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableColumnModel;
 
+import org.apache.log4j.Logger;
 import org.openrdf.model.Statement;
 import org.openrdf.query.Binding;
 import org.openrdf.query.GraphQueryResult;
 import org.openrdf.query.QueryEvaluationException;
 import org.openrdf.query.TupleQueryResult;
+import org.openrdf.repository.RepositoryException;
 
 public class DefaultResultsListener implements ResultsListener
 {
+  public static final Logger log = Logger.getLogger(DefaultResultsListener.class);
+
   private Splink mSplink;
+  private ResourceManager mResourceManager;
   private JTable mResultTable;
   TableCellRenderer mTableHeaderRenderer;
   
-  public DefaultResultsListener(Splink splink, JTable resultTable, TableCellRenderer tableHeaderRenderer)
+  public DefaultResultsListener(Splink splink, JTable resultTable, TableCellRenderer tableHeaderRenderer) throws RepositoryException
   {
     mSplink = splink;
+    mResourceManager = new ResourceManager(splink.getConnection());
     mResultTable = resultTable;
     mTableHeaderRenderer = tableHeaderRenderer;
   }
@@ -37,6 +43,7 @@ public class DefaultResultsListener implements ResultsListener
   {
     // create the table model
 
+    log.debug("mark 1");
     @SuppressWarnings("serial")
     DefaultTableModel tm = new DefaultTableModel()
     {
@@ -48,6 +55,7 @@ public class DefaultResultsListener implements ResultsListener
 
     // add columnds to table
 
+    log.debug("mark 2");
     Map<String, Integer> columnMap = new HashMap<String, Integer>();
     for (String binding : result.getBindingNames())
     {
@@ -57,6 +65,7 @@ public class DefaultResultsListener implements ResultsListener
 
     // populate the table
 
+    log.debug("mark 3");
     while (result.hasNext())
     {
       String[] row = new String[columnMap.size()];
@@ -65,6 +74,7 @@ public class DefaultResultsListener implements ResultsListener
       {
         Binding rowBinding = rowData.next();
         String binding = rowBinding.getName();
+        //String uri = rowBinding.getValue().toString();
         String uri = adjustResource(rowBinding.getValue().toString());
         row[columnMap.get(binding)] = uri;
       }
@@ -74,12 +84,14 @@ public class DefaultResultsListener implements ResultsListener
 
     // update the display
 
+    log.debug("mark 4");
     mResultTable.setModel(tm);
     TableColumnModel columnModel = mResultTable.getColumnModel();
     for (int i = 0; i < tm.getColumnCount(); ++i)
       columnModel.getColumn(i).setHeaderRenderer(mTableHeaderRenderer);
     mSplink.setResultComponent(mResultTable);
 
+    log.debug("mark 5");
     // return row count
 
     return tm.getRowCount();
@@ -89,7 +101,7 @@ public class DefaultResultsListener implements ResultsListener
   {
     return mSplink.showLongUri()
       ? resource
-      : ResourceManager.shrinkResource(mSplink.getConnection(), resource);
+      : mResourceManager.shrinkResource(resource);
   }
   
   public int onGraph(GraphQueryResult result) throws QueryEvaluationException

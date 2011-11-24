@@ -179,7 +179,7 @@ public class Splink extends JFrame implements MessageHandler
   private int mQueryLimit;
   private int mQueryTimeout;
   private UndoManager mCurrentUndoManagaer;
-  private ResultsListener mResultsListener;
+  private ResourceManager mResourceManager;
   private Properties mProperties;
   private JScrollPane mPrefixScroll;
   private JScrollPane mContextScroll;
@@ -351,9 +351,16 @@ public class Splink extends JFrame implements MessageHandler
   
   public Splink()
   {
-    initializeProperities();
-    constructUi(getContentPane());
-    initializeRepository(CONNECT_AS_DIRECTED);
+    try
+    {
+      initializeProperities();
+      constructUi(getContentPane());
+      initializeRepository(CONNECT_AS_DIRECTED);
+    }
+    catch (RepositoryException e)
+    {
+      e.printStackTrace();
+    }
   }
 
   private void initializeRepository(AutoConnectBehavior autoConnectBehavior)
@@ -387,6 +394,7 @@ public class Splink extends JFrame implements MessageHandler
       }
       mRepository = repository;
       mConnection = connection;
+      mResourceManager = new ResourceManager(mConnection);
     }
     catch (Exception e)
     {
@@ -584,7 +592,7 @@ public class Splink extends JFrame implements MessageHandler
             String contextUri = context.next().toString();
 
             if (!mShowLongUriCbmi.getState())
-              contextUri = ResourceManager.shrinkResource(mConnection, contextUri);
+              contextUri = mResourceManager.shrinkResource(contextUri);
 
             contextTable.addRow(new String[]
             {
@@ -823,7 +831,7 @@ public class Splink extends JFrame implements MessageHandler
     }
   };  
   
-  private void constructUi(Container frame)
+  private void constructUi(Container frame) throws RepositoryException
   {
     // configure frame
 
@@ -924,7 +932,7 @@ public class Splink extends JFrame implements MessageHandler
     mEditorTab.setSelectedIndex(index);
   }
   
-  private void constructResultTable()
+  private void constructResultTable() throws RepositoryException
   {
     mResultTab = new JTabbedPane();
     
@@ -938,8 +946,6 @@ public class Splink extends JFrame implements MessageHandler
       }
     };
     
-    mResultsListener = new DefaultResultsListener(this, mResult, mTableHeaderRenderer);
-
     mResult.setFont(RESULT_FONT.getFont());
     mResult.setForeground(RESULT_FONT_CLR.getColor());
     mResult.setSelectionForeground(RESULT_FONT_CLR.getColor());
@@ -1524,8 +1530,22 @@ public class Splink extends JFrame implements MessageHandler
         mPerformQuery.setEnabled(false);
         mPreviousQuery.setEnabled(false);
 
+
         View queryView = new View()
         {
+          ResultsListener mResultsListener;
+          
+          {
+            try
+            {
+              mResultsListener = new DefaultResultsListener(Splink.this, mResult, mTableHeaderRenderer);
+            }
+            catch (RepositoryException e)
+            {
+              e.printStackTrace();
+            }
+          }
+          
           public Component getViewComponent()
           {
             return null;
@@ -1574,7 +1594,7 @@ public class Splink extends JFrame implements MessageHandler
   {
     MessageHandler messageHandler = view.getMessageHandler();
     ResultsListener resultsListener = view.getResultsListener();
-    RepositoryConnection mConnection = view.getRepositoryConnection();
+    RepositoryConnection connection = view.getRepositoryConnection();
 
     long startTime = 0;
     try
@@ -1646,7 +1666,7 @@ public class Splink extends JFrame implements MessageHandler
         messageHandler.handleMessage(STATUS, message);
 
         BooleanQuery query =
-          mConnection.prepareBooleanQuery(QueryLanguage.SPARQL, queryString);
+          connection.prepareBooleanQuery(QueryLanguage.SPARQL, queryString);
         query.setMaxQueryTime(queryTimeout);
         query.setIncludeInferred(includeInffered);
         boolean result = query.evaluate();
@@ -1669,12 +1689,16 @@ public class Splink extends JFrame implements MessageHandler
         messageHandler.handleMessage(STATUS, message);
 
         TupleQuery query =
-          mConnection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
+          connection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
         query.setMaxQueryTime(queryTimeout);
         query.setIncludeInferred(includeInffered);
+        log.debug("pre query");
         TupleQueryResult result = query.evaluate();
+        log.debug("post query 1");
         int rows = resultsListener.onTuple(result);
+        log.debug("post query 2");
         int columns = result.getBindingNames().size();
+        log.debug("post query 3");
         messageHandler.handleMessage(STATUS,
           "seconds: %2.2f, cols: %d, rows: %s%s",
           (System.currentTimeMillis() - startTime) / 1000.f, columns,
@@ -1698,7 +1722,7 @@ public class Splink extends JFrame implements MessageHandler
               : " timeout " + queryTimeout + " seconds");
         messageHandler.handleMessage(STATUS, message);
         GraphQuery query =
-          mConnection.prepareGraphQuery(queryLanguage, queryString);
+          connection.prepareGraphQuery(queryLanguage, queryString);
         query.setMaxQueryTime(queryTimeout);
         query.setIncludeInferred(includeInffered);
         int rows = resultsListener.onGraph(query.evaluate());
@@ -1719,7 +1743,7 @@ public class Splink extends JFrame implements MessageHandler
         String message = format("updateing...");
         messageHandler.handleMessage(BOTH, message);
 
-        mConnection.prepareUpdate(queryLanguage, queryString).execute();
+        connection.prepareUpdate(queryLanguage, queryString).execute();
         messageHandler.handleMessage(STATUS, "seconds: %2.2f",
           (System.currentTimeMillis() - startTime) / 1000.f, 3);
         resultsListener.onUpdate();

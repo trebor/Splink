@@ -67,9 +67,11 @@ public class TestResourceManager
   public void testUri() throws RepositoryException
   {
     Repository repo = getMockRepository();
-    RepositoryConnection con = repo.getConnection();
-    con.setNamespace("too", "http://trebor.org/ns#");
-    con.setNamespace("xsd", "http://www.w3.org/2001/XMLSchema#");
+    RepositoryConnection con1 = repo.getConnection();
+    con1.setNamespace("too", "http://trebor.org/ns#");
+    con1.setNamespace("xsd", "http://www.w3.org/2001/XMLSchema#");
+    RepositoryConnection con2 = repo.getConnection();
+    ResourceManager resourceManager = new ResourceManager(con2);
 
     for (Resource resource : mResources)
     {
@@ -80,21 +82,21 @@ public class TestResourceManager
       {
       case SHORT_URI:
         assertEquals(resource.mForm1,
-          ResourceManager.shrinkResource(con, resource.mForm2));
+          resourceManager.shrinkResource(resource.mForm2));
         assertEquals(resource.mForm2,
-          ResourceManager.growResource(con, resource.mForm1));
+          resourceManager.growResource(resource.mForm1));
         break;
       case LONG_URI:
         assertEquals(resource.mForm1,
-          ResourceManager.growResource(con, resource.mForm2));
+          resourceManager.growResource(resource.mForm2));
         assertEquals(resource.mForm2,
-          ResourceManager.shrinkResource(con, resource.mForm1));
+          resourceManager.shrinkResource(resource.mForm1));
         break;
       case LITERAL:
         assertEquals(resource.mForm2,
-          ResourceManager.growResource(con, resource.mForm1));
+          resourceManager.growResource(resource.mForm1));
         assertEquals(resource.mForm1,
-          ResourceManager.shrinkResource(con, resource.mForm2));
+          resourceManager.shrinkResource(resource.mForm2));
         break;
       }
     }

@@ -3,13 +3,16 @@ package org.trebor.splink;
 import static java.lang.String.format;
 import static org.trebor.splink.ResourceManager.ResourceType.*;
 
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.apache.log4j.Logger;
 import org.openrdf.model.Namespace;
 import org.openrdf.model.URI;
+import org.openrdf.model.ValueFactory;
 import org.openrdf.repository.RepositoryConnection;
+import org.openrdf.repository.RepositoryException;
 
 public class ResourceManager
 {
@@ -25,6 +28,10 @@ public class ResourceManager
   public static final String LONG_URI_RE = format("%s://%s", PROTOCOL_IDENTIFIER_RE, URI_BODY_RE);
   public static final String LITERAL_RE = format("\"(\\p{ASCII}*)\"(@|\\^\\^)?<?(%s|%s|%s)?>?", LONG_URI_RE, SHORT_URI_RE, URI_IDENTIFIER_RE);
   public static final String BLANK_NODE_RE = format("_:%s", URI_IDENTIFIER_RE);
+
+  private final List<Namespace> mNamespaces;
+
+  private final ValueFactory mValueFactory;
 
   public enum ResourceType
   {    
@@ -62,75 +69,84 @@ public class ResourceManager
     }
   }
 
-  public static String shrinkResource(RepositoryConnection connection,
-    String longResource)
+  public ResourceManager(RepositoryConnection connection) throws RepositoryException
   {
-    try
+    if (connection != null)
     {
-      if (LONG_URI.isMatch(longResource))
-      {
-        URI uri = connection.getValueFactory().createURI(longResource);
-        for (Namespace namespace : connection.getNamespaces().asList())
-          if (namespace.getName().equals(uri.getNamespace()))
-            return namespace.getPrefix() + ":" + uri.getLocalName();
-
-        return longResource;
-      }
-      else if (LITERAL.isMatch(longResource))
-      {
-        Matcher m = LITERAL.parse(longResource);
-        String string = m.group(LITERAL_STRING_INDEX);
-        String seperator = m.group(LITERAL_SEPERATOR_INDEX);
-        String type = m.group(LITERAL_TYPE_INDEX);
-        if (seperator == null)
-          return longResource;
-
-        if (LONG_URI.isMatch(type))
-          type = shrinkResource(connection, type);
-
-        return "\"" + string + "\"" + seperator + type;
-      }
+      mNamespaces = connection.getNamespaces().asList();
+      mValueFactory = connection.getValueFactory();
     }
-    catch (Exception e)
+    else
     {
-      log.error(e);
+      mNamespaces = null;
+      mValueFactory = null;
+    }
+  }
+
+  
+  public String shrinkResource(String longResource)
+  {
+    if (mNamespaces == null)
+    {
+      log.debug("null namespace");
+      return longResource;
+    }
+    
+    if (LONG_URI.isMatch(longResource))
+    {
+      URI uri = mValueFactory.createURI(longResource);
+      for (Namespace namespace : mNamespaces)
+        if (namespace.getName().equals(uri.getNamespace()))
+          return namespace.getPrefix() + ":" + uri.getLocalName();
+
+      return longResource;
+    }
+    
+    if (LITERAL.isMatch(longResource))
+    {
+      Matcher m = LITERAL.parse(longResource);
+      String string = m.group(LITERAL_STRING_INDEX);
+      String seperator = m.group(LITERAL_SEPERATOR_INDEX);
+      String type = m.group(LITERAL_TYPE_INDEX);
+      if (seperator == null)
+        return longResource;
+
+      if (LONG_URI.isMatch(type))
+        type = shrinkResource(type);
+
+      return "\"" + string + "\"" + seperator + type;
     }
 
     return longResource;
   }
 
-  public static String growResource(RepositoryConnection connection,
-    String shortResource)
+  public String growResource(String shortResource)
   {
-    try
+    if (mNamespaces == null)
+      return shortResource;
+    
+    if (SHORT_URI.isMatch(shortResource))
     {
-      if (SHORT_URI.isMatch(shortResource))
+      for (Namespace name : mNamespaces)
       {
-        for (Namespace name : connection.getNamespaces().asList())
-        {
-          String prefix = name.getPrefix() + ":";
-          if (shortResource.startsWith(prefix))
-            return shortResource.replace(prefix, name.getName());
-        }
-      }
-      else if (LITERAL.isMatch(shortResource))
-      {
-        Matcher m = LITERAL.parse(shortResource);
-        String string = m.group(LITERAL_STRING_INDEX);
-        String seperator = m.group(LITERAL_SEPERATOR_INDEX);
-        String type = m.group(LITERAL_TYPE_INDEX);
-        if (seperator == null)
-          return shortResource;
-
-        if (SHORT_URI.isMatch(type))
-          type = "<" + growResource(connection, type) + ">";
-
-        return "\"" + string + "\"" + seperator + type;
+        String prefix = name.getPrefix() + ":";
+        if (shortResource.startsWith(prefix))
+          return shortResource.replace(prefix, name.getName());
       }
     }
-    catch (Exception e)
+    else if (LITERAL.isMatch(shortResource))
     {
-      log.error(e);
+      Matcher m = LITERAL.parse(shortResource);
+      String string = m.group(LITERAL_STRING_INDEX);
+      String seperator = m.group(LITERAL_SEPERATOR_INDEX);
+      String type = m.group(LITERAL_TYPE_INDEX);
+      if (seperator == null)
+        return shortResource;
+
+      if (SHORT_URI.isMatch(type))
+        type = "<" + growResource(type) + ">";
+
+      return "\"" + string + "\"" + seperator + type;
     }
 
     return shortResource;
