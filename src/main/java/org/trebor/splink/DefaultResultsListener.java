@@ -43,7 +43,6 @@ public class DefaultResultsListener implements ResultsListener
   {
     // create the table model
 
-    log.debug("mark 1");
     @SuppressWarnings("serial")
     DefaultTableModel tm = new DefaultTableModel()
     {
@@ -55,7 +54,6 @@ public class DefaultResultsListener implements ResultsListener
 
     // add columnds to table
 
-    log.debug("mark 2");
     Map<String, Integer> columnMap = new HashMap<String, Integer>();
     for (String binding : result.getBindingNames())
     {
@@ -65,7 +63,6 @@ public class DefaultResultsListener implements ResultsListener
 
     // populate the table
 
-    log.debug("mark 3");
     while (result.hasNext())
     {
       String[] row = new String[columnMap.size()];
@@ -84,14 +81,12 @@ public class DefaultResultsListener implements ResultsListener
 
     // update the display
 
-    log.debug("mark 4");
     mResultTable.setModel(tm);
     TableColumnModel columnModel = mResultTable.getColumnModel();
     for (int i = 0; i < tm.getColumnCount(); ++i)
       columnModel.getColumn(i).setHeaderRenderer(mTableHeaderRenderer);
     mSplink.setResultComponent(mResultTable);
 
-    log.debug("mark 5");
     // return row count
 
     return tm.getRowCount();

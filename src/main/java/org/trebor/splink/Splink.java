@@ -1530,11 +1530,10 @@ public class Splink extends JFrame implements MessageHandler
         mPerformQuery.setEnabled(false);
         mPreviousQuery.setEnabled(false);
 
-
         View queryView = new View()
         {
           ResultsListener mResultsListener;
-          
+
           {
             try
             {
@@ -1682,7 +1681,7 @@ public class Splink extends JFrame implements MessageHandler
         String message =
           format("querying%s%s...", actualLimit.get() == NO_QUERY_LIMIT
             ? " (no limit)"
-            : " with limit " + actualLimit.get(),
+            : format(" with limit %,d", actualLimit.get()),
             queryTimeout == NO_QUERY_TIMEOUT
               ? " (no timeout)"
               : " timeout " + queryTimeout + " seconds");
@@ -1692,19 +1691,15 @@ public class Splink extends JFrame implements MessageHandler
           connection.prepareTupleQuery(QueryLanguage.SPARQL, queryString);
         query.setMaxQueryTime(queryTimeout);
         query.setIncludeInferred(includeInffered);
-        log.debug("pre query");
         TupleQueryResult result = query.evaluate();
-        log.debug("post query 1");
         int rows = resultsListener.onTuple(result);
-        log.debug("post query 2");
         int columns = result.getBindingNames().size();
-        log.debug("post query 3");
         messageHandler.handleMessage(STATUS,
           "seconds: %2.2f, cols: %d, rows: %s%s",
           (System.currentTimeMillis() - startTime) / 1000.f, columns,
           (rows == QUERY_CANCELED
             ? "[canceled]"
-            : "" + rows), rows == actualLimit.get()
+            : format("%,d", rows)), rows == actualLimit.get()
             ? " (limited)"
             : "");
       }
@@ -1716,7 +1711,7 @@ public class Splink extends JFrame implements MessageHandler
         String message =
           format("describing%s%s...", actualLimit.get() == NO_QUERY_LIMIT
             ? " (no limit)"
-            : " with limit " + actualLimit.get(),
+            : format(" with limit %,d", actualLimit.get()),
             queryTimeout == NO_QUERY_TIMEOUT
               ? " (no timeout)"
               : " timeout " + queryTimeout + " seconds");
@@ -1731,7 +1726,7 @@ public class Splink extends JFrame implements MessageHandler
           (System.currentTimeMillis() - startTime) / 1000.f, 3,
           (rows == QUERY_CANCELED
             ? "[canceled]"
-            : "" + rows), rows == actualLimit.get()
+            : format("%,d", rows)), rows == actualLimit.get()
             ? " (limited)"
             : "");
       }
@@ -2324,7 +2319,7 @@ public class Splink extends JFrame implements MessageHandler
         ? "Unlimited"
         : format("Limit %,d", limit), key, limit == NO_QUERY_LIMIT
         ? "return an unlimited number of rows"
-        : "limit query results to " + limit + " rows");
+        : format("limit query results to %,d rows", limit));
       mLimit = limit;
     }
 
@@ -2334,7 +2329,7 @@ public class Splink extends JFrame implements MessageHandler
       if (getLimit() == NO_QUERY_LIMIT)
         handleMessage(STATUS, "query results size unlimited");
       else
-        handleMessage(STATUS, "query results limited to %d rows", getLimit());
+        handleMessage(STATUS, "query results limited to %,d rows", getLimit());
       updateEnabled();
     }
     
